@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社労士報告イントラ｜休暇・託児時間 集約レポート</title>
+<style>
+  :root{
+    --c-bg:#f4f6f9; --c-panel:#ffffff; --c-ink:#1f2733; --c-sub:#5b6776;
+    --c-line:#dfe4ea; --c-brand:#1d4e89; --c-brand-d:#163c69; --c-accent:#2f8f6b;
+    --c-warn:#b9760e; --c-leave:#8a4fbf; --c-care:#1d7fa8;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif;
+    background:var(--c-bg); color:var(--c-ink); font-size:14px; line-height:1.6;
+  }
+  a{color:var(--c-brand);}
+  /* ---- header ---- */
+  header.site{
+    background:linear-gradient(180deg,var(--c-brand),var(--c-brand-d));
+    color:#fff; padding:14px 22px; box-shadow:0 2px 6px rgba(0,0,0,.15);
+  }
+  header.site h1{margin:0; font-size:19px; font-weight:700; letter-spacing:.02em;}
+  header.site .sub{font-size:12px; opacity:.85; margin-top:2px;}
+  nav.tabs{
+    background:var(--c-brand-d); display:flex; flex-wrap:wrap;
+    padding:0 14px; gap:2px;
+  }
+  nav.tabs button{
+    background:transparent; border:0; color:#cdd9e8; font:inherit; font-size:13px;
+    padding:10px 16px; cursor:pointer; border-bottom:3px solid transparent;
+  }
+  nav.tabs button:hover{color:#fff;}
+  nav.tabs button.active{color:#fff; border-bottom-color:#ffc24b; font-weight:700;}
+  /* ---- layout ---- */
+  main{max-width:1080px; margin:18px auto 60px; padding:0 18px;}
+  .panel{
+    background:var(--c-panel); border:1px solid var(--c-line); border-radius:8px;
+    padding:18px 20px; margin-bottom:18px;
+  }
+  .panel h2{
+    margin:0 0 12px; font-size:15px; color:var(--c-brand);
+    border-left:4px solid var(--c-brand); padding-left:9px;
+  }
+  .panel h3{font-size:13px; margin:18px 0 8px; color:var(--c-sub);}
+  .muted{color:var(--c-sub); font-size:12px;}
+  .view{display:none;}
+  .view.active{display:block;}
+  /* ---- controls ---- */
+  .toolbar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    background:#eef2f7; border:1px solid var(--c-line); border-radius:8px;
+    padding:10px 14px; margin-bottom:16px;
+  }
+  .toolbar label{font-size:12px; color:var(--c-sub); font-weight:700;}
+  select,input[type=text]{
+    font:inherit; font-size:13px; padding:6px 9px; border:1px solid #b9c2cd;
+    border-radius:5px; background:#fff; color:var(--c-ink);
+  }
+  button.btn{
+    font:inherit; font-size:13px; padding:7px 14px; border-radius:5px;
+    border:1px solid var(--c-brand); background:var(--c-brand); color:#fff;
+    cursor:pointer;
+  }
+  button.btn:hover{background:var(--c-brand-d);}
+  button.btn.ghost{background:#fff; color:var(--c-brand);}
+  button.btn.ghost:hover{background:#eef2f7;}
+  button.btn.sub{background:#fff; color:var(--c-sub); border-color:#b9c2cd;}
+  button.btn.sub:hover{background:#eef2f7;}
+  .spacer{flex:1;}
+  /* ---- drop zone ---- */
+  #drop{
+    border:2px dashed #b3c0d0; border-radius:8px; background:#fbfcfe;
+    padding:22px; text-align:center; color:var(--c-sub); cursor:pointer;
+  }
+  #drop.over{border-color:var(--c-brand); background:#eef4fb; color:var(--c-brand);}
+  #drop strong{color:var(--c-ink);}
+  details.help{margin-top:12px; font-size:12.5px;}
+  details.help summary{cursor:pointer; color:var(--c-brand); font-weight:700;}
+  details.help ol{margin:8px 0; padding-left:22px;}
+  details.help li{margin:3px 0;}
+  textarea{
+    width:100%; min-height:90px; font-family:Consolas,monospace; font-size:12px;
+    border:1px solid #b9c2cd; border-radius:5px; padding:8px;
+  }
+  /* ---- status badges ---- */
+  .status{display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;}
+  .badge{
+    border:1px solid var(--c-line); border-radius:6px; padding:7px 12px;
+    background:#fff; font-size:12px; min-width:160px;
+  }
+  .badge .lbl{color:var(--c-sub); font-size:11px;}
+  .badge .val{font-size:14px; font-weight:700;}
+  .badge.ok{border-left:4px solid var(--c-accent);}
+  .badge.empty{border-left:4px solid #c4ccd6;}
+  /* ---- KPI cards ---- */
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px;}
+  .kpi{
+    border:1px solid var(--c-line); border-radius:8px; padding:13px 15px; background:#fff;
+  }
+  .kpi .k-lbl{font-size:11.5px; color:var(--c-sub);}
+  .kpi .k-val{font-size:23px; font-weight:700; margin-top:3px;}
+  .kpi .k-note{font-size:11px; color:var(--c-sub); margin-top:2px;}
+  .kpi.care{border-top:3px solid var(--c-care);}
+  .kpi.leave{border-top:3px solid var(--c-leave);}
+  .kpi.month{border-top:3px solid var(--c-brand);}
+  /* ---- tables ---- */
+  table.grid{border-collapse:collapse; width:100%; font-size:12.5px; margin-top:6px;}
+  table.grid th,table.grid td{border:1px solid var(--c-line); padding:6px 9px; text-align:left;}
+  table.grid thead th{background:#eef2f7; color:var(--c-brand-d); font-size:11.5px;}
+  table.grid tbody tr:nth-child(even){background:#f8fafc;}
+  table.grid td.num,table.grid th.num{text-align:right; font-variant-numeric:tabular-nums;}
+  table.grid tr.total td{background:#eaf2ea; font-weight:700;}
+  .formula{
+    font-size:11.5px; color:var(--c-sub); background:#f4f6f9;
+    border:1px dashed var(--c-line); border-radius:5px; padding:7px 10px; margin:8px 0;
+  }
+  .formula code{background:#e7ecf2; padding:1px 5px; border-radius:3px; color:var(--c-brand-d);}
+  .empty-state{
+    text-align:center; color:var(--c-sub); padding:34px 10px;
+  }
+  .pill{
+    display:inline-block; font-size:11px; padding:1px 8px; border-radius:10px;
+    background:#eef2f7; color:var(--c-sub); border:1px solid var(--c-line);
+  }
+  .pill.care{background:#e3f1f6; color:var(--c-care); border-color:#bfe0ea;}
+  .pill.leave{background:#f0e9f7; color:var(--c-leave); border-color:#ddcbee;}
+  footer.site{
+    text-align:center; color:var(--c-sub); font-size:11px; padding:20px;
+  }
+  /* ---- print report header (screen hidden) ---- */
+  .print-head{display:none;}
+  @media print{
+    body{background:#fff; font-size:11px;}
+    header.site,nav.tabs,.toolbar,#load-panel,footer.site,.no-print{display:none !important;}
+    main{max-width:none; margin:0; padding:0;}
+    .panel{border:0; padding:0; margin:0 0 14px; page-break-inside:avoid;}
+    .panel h2{font-size:13px;}
+    .view{display:block !important;}
+    .print-head{
+      display:block; border-bottom:2px solid var(--c-brand); margin-bottom:14px;
+      padding-bottom:8px;
+    }
+    .print-head .pt{font-size:16px; font-weight:700; color:var(--c-brand-d);}
+    .print-head .pm{font-size:12px; margin-top:3px;}
+    table.grid{font-size:10px;}
+    .kpi .k-val{font-size:17px;}
+    a{color:inherit; text-decoration:none;}
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <h1>社労士報告イントラ</h1>
+  <div class="sub">休暇申請・託児時間報告の集約 ／ 月次レポート出力ツール</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="dashboard" class="active">サマリー</button>
+  <button data-view="care">託児時間 月次集計</button>
+  <button data-view="leave">休暇申請 月次集計</button>
+  <button data-view="detail">明細データ</button>
+</nav>
+
+<main>
+
+  <!-- ============ データ読み込みパネル ============ -->
+  <section class="panel" id="load-panel">
+    <h2>データ読み込み</h2>
+    <p class="muted" style="margin-top:0">
+      Googleスプレッドシートを <strong>Excel(.xlsx)</strong> または <strong>CSV</strong> で書き出し、
+      下の枠にドラッグ＆ドロップ（またはクリックして選択）してください。
+      .xlsx なら1ファイルで2シートとも自動で取り込みます。
+    </p>
+    <div id="drop">
+      <div style="font-size:26px;line-height:1">⤓</div>
+      <div><strong>ここにファイルをドロップ</strong> ／ クリックして選択</div>
+      <div class="muted" style="margin-top:4px">対応形式：.xlsx ／ .csv（複数選択可）</div>
+    </div>
+    <input type="file" id="file" accept=".xlsx,.csv" multiple style="display:none">
+
+    <div class="toolbar" style="margin-top:12px;margin-bottom:0">
+      <button class="btn ghost" id="btn-fetch">スプレッドシートから直接取得を試す</button>
+      <button class="btn sub" id="btn-sample">サンプルデータで表示確認</button>
+      <button class="btn sub" id="btn-clear">読み込みデータを消去</button>
+      <span class="spacer"></span>
+      <button class="btn sub" id="btn-paste-toggle">CSVを貼り付けて読み込む</button>
+    </div>
+
+    <div id="paste-area" style="display:none;margin-top:12px">
+      <textarea id="paste" placeholder="スプレッドシートのセル範囲、またはCSVテキストを貼り付け（ヘッダー行を含めてください）"></textarea>
+      <div style="margin-top:8px"><button class="btn" id="btn-paste-load">貼り付け内容を読み込む</button></div>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <details class="help">
+      <summary>スプレッドシートの書き出し手順 / 使い方</summary>
+      <ol>
+        <li>対象のGoogleスプレッドシートを開く。</li>
+        <li>メニュー <strong>ファイル → ダウンロード → Microsoft Excel (.xlsx)</strong> を選択（1ファイルで両シート取得）。
+            ／ シート単位なら各タブで <strong>カンマ区切り形式 (.csv)</strong> を選択。</li>
+        <li>ダウンロードしたファイルを上の枠にドロップ。</li>
+        <li>上部メニューで対象月を選び、内容を確認。</li>
+        <li>月次レポートは <strong>「印刷／PDF」</strong> ボタンでPDF化、<strong>「CSV」「Excel」</strong> ボタンで書き出して社労士へ共有。</li>
+      </ol>
+      <p class="muted">
+        ※ ブラウザのセキュリティ制限（CORS）により、URLからの自動取得は失敗する場合があります。
+        その場合はファイル読み込みをご利用ください。読み込んだデータはこのブラウザ内にのみ保存されます。
+      </p>
+    </details>
+  </section>
+
+  <!-- ============ 共通ツールバー ============ -->
+  <div class="toolbar" id="report-toolbar" style="display:none">
+    <label>対象月</label>
+    <select id="sel-month"></select>
+    <label>従業員</label>
+    <select id="sel-emp"></select>
+    <span class="spacer"></span>
+    <button class="btn" id="btn-print">印刷／PDF</button>
+    <button class="btn ghost" id="btn-csv">CSV書き出し</button>
+    <button class="btn ghost" id="btn-xls">Excel書き出し</button>
+  </div>
+
+  <!-- 印刷時のレポート見出し -->
+  <div class="print-head" id="print-head">
+    <div class="pt">社労士報告レポート</div>
+    <div class="pm" id="print-meta"></div>
+  </div>
+
+  <!-- ============ サマリー ============ -->
+  <section class="view active" id="view-dashboard">
+    <div class="panel">
+      <h2>月次サマリー</h2>
+      <div class="kpis" id="kpis"></div>
+      <p class="muted" id="dash-note" style="margin-bottom:0"></p>
+    </div>
+  </section>
+
+  <!-- ============ 託児時間 月次集計 ============ -->
+  <section class="view" id="view-care">
+    <div class="panel">
+      <h2>託児時間報告 ― 月次集計・託児費用（従業員別）</h2>
+      <div class="formula">
+        <div>① 利用時間 = <code>(AM終了 − AM開始) + (PM終了 − PM開始)</code> を当月分合算（10分単位で集計）</div>
+        <div>② 託児費用 = <code>利用時間 ÷ 10分 × 50円</code>（1時間300円・10分単位／端数切り上げ）</div>
+        <div>③ 給与天引き額 = <code>min(託児費用, 月額上限 ¥35,000)</code></div>
+        <div class="muted" style="margin-top:4px">※ 子どもの人数に関わらず、従業員ごとの月間利用時間のみで算定します。</div>
+      </div>
+      <div id="care-summary"></div>
+    </div>
+  </section>
+
+  <!-- ============ 休暇申請 月次集計 ============ -->
+  <section class="view" id="view-leave">
+    <div class="panel">
+      <h2>休暇申請 ― 月次集計（申請者別）</h2>
+      <div class="formula">
+        休暇日数の算出式：
+        <code>日数 = (有給終了日 − 有給開始日) + 1</code>
+        ／ 開始・終了日が無い申請は 1 件＝1 日として計上。月の振り分けは有給開始日を基準。
+      </div>
+      <div id="leave-summary"></div>
+    </div>
+  </section>
+
+  <!-- ============ 明細 ============ -->
+  <section class="view" id="view-detail">
+    <div class="panel">
+      <h2>託児時間報告 ― 明細</h2>
+      <div id="care-detail"></div>
+    </div>
+    <div class="panel">
+      <h2>休暇申請 ― 明細</h2>
+      <div id="leave-detail"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  社労士報告イントラ ／ 社内利用ツール ― データはご利用中のブラウザ内にのみ保存されます。
+</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   社労士報告イントラ ― 集約・月次レポート
+   対象スプレッドシート:
+     - 休暇申請フォーム  (gid=0)
+     - 託児時間報告フォーム (gid=652314846)
+   ============================================================ */
+
+const SHEET_ID = "1oQuCoAES6X7e2b0rOURLDUiYVHeAwZ-ybVcn7vH1Wvc";
+const GIDS = { leave: "0", care: "652314846" };
+
+/* ---- 託児費用の計算ルール（社労士へ報告し給与天引きする金額の算定基準）----
+   ・1時間 300円  ・料金計算は10分単位（端数切り上げ）
+   ・1人あたり月額上限 35,000円
+   ・子どもの人数に関わらず、利用時間のみで算定                              */
+const FEE = { ratePerHour: 300, unitMinutes: 10, monthlyCap: 35000 };
+const FEE_PER_UNIT = FEE.ratePerHour * FEE.unitMinutes / 60;   // 10分 = 50円
+const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
+
+/* 月間利用時間(小数h) → 託児費用の算定結果 */
+function calcFee(hours){
+  const totalMin  = Math.round((hours || 0) * 60);              // 浮動小数の誤差を吸収
+  const units     = Math.ceil(totalMin / FEE.unitMinutes);      // 10分単位（切り上げ）
+  const chargeMin = units * FEE.unitMinutes;                    // 課金対象の分数
+  const raw       = units * FEE_PER_UNIT;                       // 上限適用前の費用
+  const billed    = Math.min(raw, FEE.monthlyCap);              // 給与天引き額
+  return { chargeMin, raw, billed, capped: raw > FEE.monthlyCap };
+}
+
+/* ---- アプリ状態 ---- */
+const STATE = {
+  leave: [],   // 休暇申請レコード
+  care: [],    // 託児時間報告レコード
+  loadedAt: null
+};
+
+/* ============================================================
+   ユーティリティ
+   ============================================================ */
+const $  = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+const pad2 = n => String(n).padStart(2, "0");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* Excelシリアル値 → {y,m,d} （基準日 1899-12-30） */
+function serialToYMD(serial){
+  const ms = Date.UTC(1899,11,30) + Math.floor(serial)*86400000;
+  const d = new Date(ms);
+  return { y:d.getUTCFullYear(), m:d.getUTCMonth()+1, d:d.getUTCDate() };
+}
+
+/* 日付の解釈 → {y,m,d} または null */
+function parseDate(v){
+  if(v===null || v===undefined || v==="") return null;
+  if(typeof v === "number") return serialToYMD(v);
+  const s = String(v).trim();
+  if(s==="") return null;
+  if(/^\d+(\.\d+)?$/.test(s)) return serialToYMD(parseFloat(s));
+  let m = s.match(/(\d{4})\s*[\/\-年]\s*(\d{1,2})\s*[\/\-月]\s*(\d{1,2})/);
+  if(m) return { y:+m[1], m:+m[2], d:+m[3] };
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if(m) return { y:+m[3], m:+m[1], d:+m[2] };
+  const d = new Date(s);
+  if(!isNaN(d)) return { y:d.getFullYear(), m:d.getMonth()+1, d:d.getDate() };
+  return null;
+}
+
+/* 時刻の解釈 → 時間(小数) または null */
+function parseTime(v){
+  if(v===null || v===undefined || v==="") return null;
+  if(typeof v === "number"){
+    const f = v - Math.floor(v);
+    return f * 24;
+  }
+  let s = String(v).trim();
+  if(s==="") return null;
+  if(/^\d*\.\d+$/.test(s)){
+    const n = parseFloat(s);
+    return (n - Math.floor(n)) * 24;
+  }
+  const low = s.toLowerCase();
+  const isPM = /pm|午後/.test(low);
+  const isAM = /am|午前/.test(low);
+  const m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(!m) return null;
+  let h = +m[1]; const mi = +m[2], se = +(m[3]||0);
+  if(isPM && h < 12) h += 12;
+  if(isAM && h === 12) h = 0;
+  return h + mi/60 + se/3600;
+}
+
+function ymKey(ymd){ return ymd ? `${ymd.y}-${pad2(ymd.m)}` : null; }
+function ymdStr(ymd){ return ymd ? `${ymd.y}/${pad2(ymd.m)}/${pad2(ymd.d)}` : ""; }
+function ymLabel(key){
+  if(!key) return "";
+  const [y,m] = key.split("-");
+  return `${y}年${+m}月`;
+}
+function dateDiffDays(a, b){
+  const t1 = Date.UTC(a.y,a.m-1,a.d), t2 = Date.UTC(b.y,b.m-1,b.d);
+  return Math.round((t2 - t1) / 86400000);
+}
+
+/* 勤務時間 → "8.50 h（8時間30分）" */
+function fmtHours(h){
+  if(h===null || h===undefined || isNaN(h)) return "";
+  const total = Math.round(h*60);
+  const hh = Math.floor(total/60), mm = total%60;
+  return `${h.toFixed(2)} h（${hh}時間${pad2(mm)}分）`;
+}
+function fmtHoursShort(h){
+  if(h===null || h===undefined || isNaN(h)) return "—";
+  return h.toFixed(2);
+}
+
+/* ============================================================
+   CSV パーサ
+   ============================================================ */
+function parseCSV(text){
+  text = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const rows = []; let row = [], field = "", q = false;
+  for(let i=0; i<text.length; i++){
+    const c = text[i];
+    if(q){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else q = false;
+      } else field += c;
+    } else {
+      if(c === '"') q = true;
+      else if(c === ","){ row.push(field); field = ""; }
+      else if(c === "\n"){ row.push(field); rows.push(row); row = []; field = ""; }
+      else field += c;
+    }
+  }
+  if(field !== "" || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ""));
+}
+
+/* ============================================================
+   XLSX パーサ（ZIP展開 + XML解析、外部ライブラリ不要）
+   ============================================================ */
+async function inflateRaw(bytes){
+  if(typeof DecompressionStream === "undefined")
+    throw new Error("このブラウザは.xlsx展開に未対応です。CSV形式をご利用ください。");
+  const ds = new DecompressionStream("deflate-raw");
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function readZipEntries(buf){
+  const dv = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  /* End Of Central Directory を末尾から探索 */
+  let eocd = -1;
+  for(let i = buf.byteLength-22; i >= Math.max(0, buf.byteLength-65557); i--){
+    if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  }
+  if(eocd < 0) throw new Error("ZIP(.xlsx)の構造を読み取れませんでした。");
+  const count   = dv.getUint16(eocd+10, true);
+  let   cdOff   = dv.getUint32(eocd+16, true);
+  const entries = {};
+  for(let n=0; n<count; n++){
+    if(dv.getUint32(cdOff, true) !== 0x02014b50) break;
+    const method  = dv.getUint16(cdOff+10, true);
+    const compSz  = dv.getUint32(cdOff+20, true);
+    const nameLen = dv.getUint16(cdOff+28, true);
+    const extraLn = dv.getUint16(cdOff+30, true);
+    const cmtLen  = dv.getUint16(cdOff+32, true);
+    const locOff  = dv.getUint32(cdOff+42, true);
+    const name    = new TextDecoder("utf-8").decode(bytes.subarray(cdOff+46, cdOff+46+nameLen));
+    /* ローカルヘッダからデータ開始位置を算出 */
+    const lNameLn = dv.getUint16(locOff+26, true);
+    const lExtraLn= dv.getUint16(locOff+28, true);
+    const dataOff = locOff + 30 + lNameLn + lExtraLn;
+    const comp    = bytes.subarray(dataOff, dataOff+compSz);
+    let raw;
+    if(method === 0) raw = comp;
+    else if(method === 8) raw = await inflateRaw(comp);
+    else { cdOff += 46 + nameLen + extraLn + cmtLen; continue; }
+    entries[name] = raw;
+    cdOff += 46 + nameLen + extraLn + cmtLen;
+  }
+  return entries;
+}
+
+function xmlDoc(bytes){
+  const text = new TextDecoder("utf-8").decode(bytes);
+  return new DOMParser().parseFromString(text, "application/xml");
+}
+function parseSharedStrings(bytes){
+  if(!bytes) return [];
+  const doc = xmlDoc(bytes);
+  return [...doc.getElementsByTagName("si")].map(si =>
+    [...si.getElementsByTagName("t")].map(t => t.textContent).join(""));
+}
+function colNumber(ref){
+  const letters = ref.replace(/[0-9]/g, "");
+  let n = 0;
+  for(const ch of letters) n = n*26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+function parseWorksheet(bytes, shared){
+  const doc = xmlDoc(bytes);
+  const out = [];
+  for(const row of doc.getElementsByTagName("row")){
+    const arr = [];
+    for(const c of row.getElementsByTagName("c")){
+      const ref = c.getAttribute("r") || "";
+      const ci  = ref ? colNumber(ref) : arr.length;
+      const t   = c.getAttribute("t");
+      let val = "";
+      if(t === "s"){
+        const v = c.getElementsByTagName("v")[0];
+        val = v ? (shared[+v.textContent] ?? "") : "";
+      } else if(t === "inlineStr"){
+        val = [...c.getElementsByTagName("t")].map(x => x.textContent).join("");
+      } else {
+        const v = c.getElementsByTagName("v")[0];
+        val = v ? v.textContent : "";
+        if(val !== "" && !isNaN(val)) val = Number(val);
+      }
+      arr[ci] = val;
+    }
+    out.push(arr);
+  }
+  return out;
+}
+async function parseXlsx(buf){
+  const entries = await readZipEntries(buf);
+  const shared  = parseSharedStrings(entries["xl/sharedStrings.xml"]);
+  const sheets  = [];
+  Object.keys(entries)
+    .filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a,b)=> (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]))
+    .forEach(name => sheets.push(parseWorksheet(entries[name], shared)));
+  return sheets; // 行配列の配列
+}
+
+/* ============================================================
+   フォーム種別の判定 と レコード化
+   ============================================================ */
+function detectKind(header){
+  const h = header.map(x => String(x||"").trim());
+  const has = kw => h.some(c => c.includes(kw));
+  if(has("開始時間(AM)") || has("託児")) return "care";
+  if(has("休暇の種類") || has("有給開始日") || has("申請者")) return "leave";
+  return null;
+}
+/* ヘッダ名 → 列index（部分一致） */
+function colFinder(header){
+  const h = header.map(x => String(x||"").trim());
+  return kw => {
+    let i = h.findIndex(c => c === kw);
+    if(i < 0) i = h.findIndex(c => c.includes(kw));
+    return i;
+  };
+}
+
+function rowsToCare(rows){
+  if(rows.length < 1) return [];
+  const find = colFinder(rows[0]);
+  const ci = {
+    ts:   find("タイムスタンプ"),
+    rep:  find("報告者"),
+    emp:  find("従業員名"),
+    amS:  find("開始時間(AM)"),
+    amE:  find("終了時間(AM)"),
+    pmS:  find("開始時間(PM)"),
+    pmE:  find("終了時間(PM)")
+  };
+  const recs = [];
+  for(let r=1; r<rows.length; r++){
+    const row = rows[r];
+    if(!row || row.every(c => String(c??"").trim()==="")) continue;
+    const ts  = parseDate(row[ci.ts]);
+    const amS = parseTime(row[ci.amS]), amE = parseTime(row[ci.amE]);
+    const pmS = parseTime(row[ci.pmS]), pmE = parseTime(row[ci.pmE]);
+    const amH = (amS!=null && amE!=null && amE>amS) ? amE-amS : 0;
+    const pmH = (pmS!=null && pmE!=null && pmE>pmS) ? pmE-pmS : 0;
+    recs.push({
+      ts, date: ts, month: ymKey(ts),
+      reporter: String(row[ci.rep] ?? "").trim(),
+      employee: String(row[ci.emp] ?? "").trim() || "（氏名未入力）",
+      amS, amE, pmS, pmE, amH, pmH, hours: amH+pmH,
+      raw: { amS:row[ci.amS], amE:row[ci.amE], pmS:row[ci.pmS], pmE:row[ci.pmE] }
+    });
+  }
+  return recs;
+}
+
+function rowsToLeave(rows){
+  if(rows.length < 1) return [];
+  const find = colFinder(rows[0]);
+  const ci = {
+    ts:    find("タイムスタンプ"),
+    name:  find("申請者"),
+    today: find("今日の日付"),
+    kind:  find("休暇の種類"),
+    item:  find("申請項目"),
+    start: find("有給開始日"),
+    end:   find("有給終了日")
+  };
+  const recs = [];
+  for(let r=1; r<rows.length; r++){
+    const row = rows[r];
+    if(!row || row.every(c => String(c??"").trim()==="")) continue;
+    const ts    = parseDate(row[ci.ts]);
+    const today = parseDate(row[ci.today]);
+    const start = parseDate(row[ci.start]);
+    const end   = parseDate(row[ci.end]);
+    let days = 1;
+    if(start && end){
+      const d = dateDiffDays(start, end);
+      days = d >= 0 ? d + 1 : 1;
+    }
+    const base = start || today || ts;
+    recs.push({
+      ts, today, start, end, days,
+      month: ymKey(base),
+      applicant: String(row[ci.name] ?? "").trim() || "（氏名未入力）",
+      kind: String(row[ci.kind] ?? "").trim() || "（種類未入力）",
+      item: String(row[ci.item] ?? "").trim()
+    });
+  }
+  return recs;
+}
+
+/* ============================================================
+   データ取り込み入口
+   ============================================================ */
+function ingestRows(rows, srcLabel){
+  if(!rows.length) return false;
+  const kind = detectKind(rows[0]);
+  if(kind === "care"){ STATE.care = rowsToCare(rows); }
+  else if(kind === "leave"){ STATE.leave = rowsToLeave(rows); }
+  else { alert(`「${srcLabel}」の列構成を判別できませんでした。ヘッダー行を含めて読み込んでください。`); return false; }
+  return true;
+}
+
+async function handleFiles(fileList){
+  let ok = 0;
+  for(const file of fileList){
+    try{
+      if(/\.xlsx$/i.test(file.name)){
+        const sheets = await parseXlsx(await file.arrayBuffer());
+        for(const rows of sheets){ if(ingestRows(rows, file.name)) ok++; }
+      } else if(/\.csv$/i.test(file.name)){
+        const rows = parseCSV(await file.text());
+        if(ingestRows(rows, file.name)) ok++;
+      } else {
+        alert(`未対応の形式です：${file.name}`);
+      }
+    }catch(err){
+      console.error(err);
+      alert(`「${file.name}」の読み込みに失敗しました：\n${err.message}`);
+    }
+  }
+  if(ok){ STATE.loadedAt = new Date(); persist(); refreshAll(); }
+}
+
+/* ============================================================
+   永続化（localStorage）
+   ============================================================ */
+const LS_KEY = "sharoushi-intra-v1";
+function persist(){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      leave: STATE.leave, care: STATE.care,
+      loadedAt: STATE.loadedAt ? STATE.loadedAt.toISOString() : null
+    }));
+  }catch(e){ /* 容量超過などは無視 */ }
+}
+function restore(){
+  try{
+    const j = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+    if(!j) return;
+    STATE.leave = j.leave || [];
+    STATE.care  = j.care  || [];
+    STATE.loadedAt = j.loadedAt ? new Date(j.loadedAt) : null;
+  }catch(e){ /* ignore */ }
+}
+
+/* ============================================================
+   集計
+   ============================================================ */
+function allMonths(){
+  const set = new Set();
+  STATE.care.forEach(r => r.month && set.add(r.month));
+  STATE.leave.forEach(r => r.month && set.add(r.month));
+  return [...set].sort().reverse();
+}
+function allEmployees(){
+  const set = new Set();
+  STATE.care.forEach(r => set.add(r.employee));
+  STATE.leave.forEach(r => set.add(r.applicant));
+  return [...set].sort();
+}
+function filterByMonth(arr, month){
+  return month === "ALL" ? arr : arr.filter(r => r.month === month);
+}
+function filterByEmp(arr, emp, key){
+  return emp === "ALL" ? arr : arr.filter(r => r[key] === emp);
+}
+
+/* 託児：従業員別集計（月間利用時間 → 託児費用を算定） */
+function aggregateCare(recs){
+  const map = new Map();
+  for(const r of recs){
+    if(!map.has(r.employee))
+      map.set(r.employee, { name:r.employee, days:0, amH:0, pmH:0, hours:0 });
+    const o = map.get(r.employee);
+    o.days++; o.amH += r.amH; o.pmH += r.pmH; o.hours += r.hours;
+  }
+  const list = [...map.values()];
+  for(const o of list) o.fee = calcFee(o.hours);   // 1人あたり月間で費用算定
+  return list.sort((a,b) => b.hours - a.hours);
+}
+/* 休暇：申請者別集計（種類別内訳つき） */
+function aggregateLeave(recs){
+  const kinds = [...new Set(recs.map(r => r.kind))].sort();
+  const map = new Map();
+  for(const r of recs){
+    if(!map.has(r.applicant))
+      map.set(r.applicant, { name:r.applicant, byKind:{}, count:0, days:0 });
+    const o = map.get(r.applicant);
+    o.byKind[r.kind] = (o.byKind[r.kind] || 0) + r.days;
+    o.count++; o.days += r.days;
+  }
+  return { kinds, rows:[...map.values()].sort((a,b) => b.days - a.days) };
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+function curMonth(){ return $("#sel-month").value || "ALL"; }
+function curEmp(){ return $("#sel-emp").value || "ALL"; }
+
+function refreshAll(){
+  const hasData = STATE.care.length || STATE.leave.length;
+  $("#report-toolbar").style.display = hasData ? "flex" : "none";
+  renderStatus();
+  renderMonthSelect();
+  renderEmpSelect();
+  renderDashboard();
+  renderCare();
+  renderLeave();
+  renderDetail();
+  renderPrintHead();
+}
+
+function renderStatus(){
+  const box = $("#status");
+  const mk = (cls,lbl,val) =>
+    `<div class="badge ${cls}"><div class="lbl">${lbl}</div><div class="val">${val}</div></div>`;
+  box.innerHTML =
+    mk(STATE.leave.length ? "ok":"empty", "休暇申請フォーム",
+       STATE.leave.length ? `${STATE.leave.length} 件` : "未読み込み") +
+    mk(STATE.care.length ? "ok":"empty", "託児時間報告フォーム",
+       STATE.care.length ? `${STATE.care.length} 件` : "未読み込み") +
+    mk("empty", "最終読み込み",
+       STATE.loadedAt ? STATE.loadedAt.toLocaleString("ja-JP") : "—");
+}
+
+function renderMonthSelect(){
+  const sel = $("#sel-month");
+  const prev = sel.value;
+  const months = allMonths();
+  sel.innerHTML = `<option value="ALL">全期間</option>` +
+    months.map(m => `<option value="${m}">${ymLabel(m)}</option>`).join("");
+  if(prev && [...sel.options].some(o => o.value===prev)) sel.value = prev;
+  else if(months.length) sel.value = months[0];
+}
+function renderEmpSelect(){
+  const sel = $("#sel-emp");
+  const prev = sel.value;
+  const emps = allEmployees();
+  sel.innerHTML = `<option value="ALL">全員</option>` +
+    emps.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join("");
+  if(prev && [...sel.options].some(o => o.value===prev)) sel.value = prev;
+}
+
+function renderPrintHead(){
+  const m = curMonth(), e = curEmp();
+  $("#print-meta").innerHTML =
+    `対象月：<strong>${m==="ALL"?"全期間":ymLabel(m)}</strong>　／　` +
+    `対象：<strong>${e==="ALL"?"全従業員":esc(e)}</strong>　／　` +
+    `出力日：${new Date().toLocaleDateString("ja-JP")}`;
+}
+
+/* ---- サマリー ---- */
+function renderDashboard(){
+  const box = $("#kpis");
+  if(!STATE.care.length && !STATE.leave.length){
+    box.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      データが読み込まれていません。上の「データ読み込み」からファイルを取り込んでください。<br>
+      <span class="muted">レイアウトを確認したい場合は「サンプルデータで表示確認」をご利用ください。</span>
+    </div>`;
+    $("#dash-note").textContent = "";
+    return;
+  }
+  const m = curMonth(), e = curEmp();
+  const care  = filterByEmp(filterByMonth(STATE.care, m), e, "employee");
+  const leave = filterByEmp(filterByMonth(STATE.leave, m), e, "applicant");
+  const careH  = care.reduce((s,r) => s+r.hours, 0);
+  const leaveD = leave.reduce((s,r) => s+r.days, 0);
+  const cAgg   = aggregateCare(care);
+  const feeRaw    = cAgg.reduce((s,o) => s+o.fee.raw, 0);
+  const feeBilled = cAgg.reduce((s,o) => s+o.fee.billed, 0);
+  const cappedCnt = cAgg.filter(o => o.fee.capped).length;
+  const card = (cls,lbl,val,note) =>
+    `<div class="kpi ${cls}"><div class="k-lbl">${lbl}</div>
+     <div class="k-val">${val}</div><div class="k-note">${note||""}</div></div>`;
+  box.innerHTML =
+    card("month","対象月", m==="ALL"?"全期間":ymLabel(m), e==="ALL"?"全従業員":esc(e)) +
+    card("care","託児時間 報告件数", `${care.length} 件`, "提出された日次報告") +
+    card("care","託児 利用時間 合計", careH.toFixed(2)+" h", fmtHours(careH).replace(/^[\d.]+ h/,"").replace(/[（）]/g,"")) +
+    card("care","給与天引き額 合計", yen(feeBilled),
+         `託児費用 ${yen(feeRaw)}` + (cappedCnt?`／上限適用 ${cappedCnt}名`:"")) +
+    card("leave","休暇申請 件数", `${leave.length} 件`, "提出された申請") +
+    card("leave","休暇日数 合計", `${leaveD} 日`, "申請日数の合計");
+  $("#dash-note").textContent =
+    "※ 託児費用は ¥300/時・10分単位（端数切り上げ）で算定し、月額上限¥35,000を適用した「給与天引き額」を社労士へ報告します。" +
+    "託児報告の月振り分けはタイムスタンプの日付を基準にしています。";
+}
+
+/* ---- 託児 月次集計 ---- */
+function renderCare(){
+  const box = $("#care-summary");
+  if(!STATE.care.length){
+    box.innerHTML = `<div class="empty-state">託児時間報告フォームのデータが未読み込みです。</div>`;
+    return;
+  }
+  const m = curMonth(), e = curEmp();
+  const recs = filterByEmp(filterByMonth(STATE.care, m), e, "employee");
+  if(!recs.length){ box.innerHTML = `<div class="empty-state">対象条件に該当する報告はありません。</div>`; return; }
+  const agg = aggregateCare(recs);
+  const hm = min => `${Math.floor(min/60)}時間${pad2(min%60)}分`;
+  const tot = agg.reduce((s,o)=>({
+    days:s.days+o.days, hours:s.hours+o.hours,
+    chargeMin:s.chargeMin+o.fee.chargeMin, raw:s.raw+o.fee.raw, billed:s.billed+o.fee.billed
+  }), {days:0,hours:0,chargeMin:0,raw:0,billed:0});
+  let html = `<table class="grid"><thead><tr>
+    <th>従業員名</th><th class="num">報告日数</th>
+    <th class="num">利用時間 合計</th><th>課金対象時間<br><span class="muted">(10分単位)</span></th>
+    <th class="num">託児費用</th><th class="num">給与天引き額<br><span class="muted">(上限¥35,000)</span></th>
+    </tr></thead><tbody>`;
+  for(const o of agg){
+    html += `<tr><td>${esc(o.name)}</td>
+      <td class="num">${o.days}</td>
+      <td class="num">${o.hours.toFixed(2)} h</td>
+      <td>${hm(o.fee.chargeMin)}</td>
+      <td class="num">${yen(o.fee.raw)}</td>
+      <td class="num">${yen(o.fee.billed)}${o.fee.capped?' <span class="pill">上限適用</span>':''}</td></tr>`;
+  }
+  html += `<tr class="total"><td>合計（${agg.length}名）</td>
+    <td class="num">${tot.days}</td>
+    <td class="num">${tot.hours.toFixed(2)} h</td>
+    <td>${hm(tot.chargeMin)}</td>
+    <td class="num">${yen(tot.raw)}</td>
+    <td class="num">${yen(tot.billed)}</td></tr>`;
+  html += `</tbody></table>
+    <p class="muted" style="margin-top:8px">
+      「給与天引き額」が社労士へ報告する金額です。上限¥35,000を超えた従業員には
+      <span class="pill">上限適用</span> を表示しています。AM/PMの内訳・各日の時間は「明細データ」タブで確認できます。
+    </p>`;
+  box.innerHTML = html;
+}
+
+/* ---- 休暇 月次集計 ---- */
+function renderLeave(){
+  const box = $("#leave-summary");
+  if(!STATE.leave.length){
+    box.innerHTML = `<div class="empty-state">休暇申請フォームのデータが未読み込みです。</div>`;
+    return;
+  }
+  const m = curMonth(), e = curEmp();
+  const recs = filterByEmp(filterByMonth(STATE.leave, m), e, "applicant");
+  if(!recs.length){ box.innerHTML = `<div class="empty-state">対象条件に該当する申請はありません。</div>`; return; }
+  const { kinds, rows } = aggregateLeave(recs);
+  let html = `<table class="grid"><thead><tr><th>申請者</th>` +
+    kinds.map(k => `<th class="num">${esc(k)}<br><span class="muted">(日)</span></th>`).join("") +
+    `<th class="num">申請件数</th><th class="num">日数 合計</th></tr></thead><tbody>`;
+  const tot = { byKind:{}, count:0, days:0 };
+  for(const o of rows){
+    html += `<tr><td>${esc(o.name)}</td>`;
+    for(const k of kinds){
+      const v = o.byKind[k] || 0;
+      tot.byKind[k] = (tot.byKind[k]||0) + v;
+      html += `<td class="num">${v || "—"}</td>`;
+    }
+    tot.count += o.count; tot.days += o.days;
+    html += `<td class="num">${o.count}</td><td class="num">${o.days}</td></tr>`;
+  }
+  html += `<tr class="total"><td>合計（${rows.length}名）</td>` +
+    kinds.map(k => `<td class="num">${tot.byKind[k]||0}</td>`).join("") +
+    `<td class="num">${tot.count}</td><td class="num">${tot.days}</td></tr>`;
+  html += `</tbody></table>`;
+  box.innerHTML = html;
+}
+
+/* ---- 明細 ---- */
+function renderDetail(){
+  const m = curMonth(), e = curEmp();
+  /* 託児明細 */
+  const cBox = $("#care-detail");
+  const cRecs = filterByEmp(filterByMonth(STATE.care, m), e, "employee")
+    .slice().sort((a,b)=> (a.month||"").localeCompare(b.month||""));
+  if(!cRecs.length){
+    cBox.innerHTML = `<div class="empty-state">該当する託児時間報告はありません。</div>`;
+  } else {
+    let h = `<table class="grid"><thead><tr>
+      <th>日付</th><th>従業員名</th><th>報告者</th>
+      <th class="num">開始AM</th><th class="num">終了AM</th>
+      <th class="num">開始PM</th><th class="num">終了PM</th>
+      <th class="num">勤務時間</th></tr></thead><tbody>`;
+    const tH = t => t==null ? "—" : `${Math.floor(t)}:${pad2(Math.round((t%1)*60))}`;
+    for(const r of cRecs){
+      h += `<tr><td>${ymdStr(r.date)}</td><td>${esc(r.employee)}</td><td>${esc(r.reporter)}</td>
+        <td class="num">${tH(r.amS)}</td><td class="num">${tH(r.amE)}</td>
+        <td class="num">${tH(r.pmS)}</td><td class="num">${tH(r.pmE)}</td>
+        <td class="num">${r.hours.toFixed(2)}</td></tr>`;
+    }
+    h += `</tbody></table>`;
+    cBox.innerHTML = h;
+  }
+  /* 休暇明細 */
+  const lBox = $("#leave-detail");
+  const lRecs = filterByEmp(filterByMonth(STATE.leave, m), e, "applicant")
+    .slice().sort((a,b)=> (a.month||"").localeCompare(b.month||""));
+  if(!lRecs.length){
+    lBox.innerHTML = `<div class="empty-state">該当する休暇申請はありません。</div>`;
+  } else {
+    let h = `<table class="grid"><thead><tr>
+      <th>申請者</th><th>休暇の種類</th><th>申請項目</th>
+      <th>有給開始日</th><th>有給終了日</th><th class="num">日数</th>
+      <th>申請日</th></tr></thead><tbody>`;
+    for(const r of lRecs){
+      h += `<tr><td>${esc(r.applicant)}</td><td>${esc(r.kind)}</td><td>${esc(r.item)}</td>
+        <td>${ymdStr(r.start)}</td><td>${ymdStr(r.end)}</td>
+        <td class="num">${r.days}</td><td>${ymdStr(r.today||r.ts)}</td></tr>`;
+    }
+    h += `</tbody></table>`;
+    lBox.innerHTML = h;
+  }
+}
+
+/* ============================================================
+   書き出し（CSV / Excel）
+   ============================================================ */
+function buildReportRows(){
+  const m = curMonth(), e = curEmp();
+  const care  = filterByEmp(filterByMonth(STATE.care, m), e, "employee");
+  const leave = filterByEmp(filterByMonth(STATE.leave, m), e, "applicant");
+  const rows = [];
+  rows.push(["社労士報告レポート"]);
+  rows.push(["対象月", m==="ALL"?"全期間":ymLabel(m), "対象", e==="ALL"?"全従業員":e,
+             "出力日", new Date().toLocaleDateString("ja-JP")]);
+  rows.push([]);
+  /* 託児集計・費用 */
+  rows.push(["■ 託児時間報告 月次集計・託児費用（従業員別）"]);
+  rows.push(["算定基準：1時間 ¥300（10分単位・端数切り上げ）／月額上限 ¥35,000／人数不問・利用時間のみで算定"]);
+  rows.push(["従業員名","報告日数","利用時間合計(h)","課金対象時間(分)","託児費用(円)","給与天引き額(円)","上限適用"]);
+  const cAgg = aggregateCare(care);
+  let ct = {days:0,hours:0,chargeMin:0,raw:0,billed:0};
+  for(const o of cAgg){
+    rows.push([o.name,o.days,o.hours.toFixed(2),o.fee.chargeMin,
+               Math.round(o.fee.raw),Math.round(o.fee.billed),o.fee.capped?"○":""]);
+    ct.days+=o.days; ct.hours+=o.hours; ct.chargeMin+=o.fee.chargeMin;
+    ct.raw+=o.fee.raw; ct.billed+=o.fee.billed;
+  }
+  rows.push(["合計",ct.days,ct.hours.toFixed(2),ct.chargeMin,
+             Math.round(ct.raw),Math.round(ct.billed),""]);
+  rows.push([]);
+  /* 休暇集計 */
+  rows.push(["■ 休暇申請 月次集計（申請者別）"]);
+  const { kinds, rows:lRows } = aggregateLeave(leave);
+  rows.push(["申請者", ...kinds, "申請件数","日数合計"]);
+  const lt = { byKind:{}, count:0, days:0 };
+  for(const o of lRows){
+    rows.push([o.name, ...kinds.map(k=>o.byKind[k]||0), o.count, o.days]);
+    kinds.forEach(k => lt.byKind[k]=(lt.byKind[k]||0)+(o.byKind[k]||0));
+    lt.count+=o.count; lt.days+=o.days;
+  }
+  rows.push(["合計", ...kinds.map(k=>lt.byKind[k]||0), lt.count, lt.days]);
+  return rows;
+}
+function reportFileName(ext){
+  const m = curMonth();
+  return `社労士報告_${m==="ALL"?"全期間":m}_${new Date().toISOString().slice(0,10)}.${ext}`;
+}
+function download(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function exportCSV(){
+  if(!STATE.care.length && !STATE.leave.length){ alert("書き出すデータがありません。"); return; }
+  const rows = buildReportRows();
+  const csv = rows.map(r => r.map(c => {
+    const s = String(c ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(",")).join("\r\n");
+  download(new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8"}), reportFileName("csv"));
+}
+function exportXLS(){
+  if(!STATE.care.length && !STATE.leave.length){ alert("書き出すデータがありません。"); return; }
+  const rows = buildReportRows();
+  const body = rows.map(r =>
+    "<tr>" + r.map(c => `<td>${esc(c)}</td>`).join("") + "</tr>").join("");
+  const html =
+    `<html xmlns:o="urn:schemas-microsoft-com:office:office" ` +
+    `xmlns:x="urn:schemas-microsoft-com:office:excel">` +
+    `<head><meta charset="utf-8"></head><body><table border="1">${body}</table></body></html>`;
+  download(new Blob(["﻿"+html], {type:"application/vnd.ms-excel"}), reportFileName("xls"));
+}
+
+/* ============================================================
+   スプレッドシートから直接取得（best effort / CORS依存）
+   ============================================================ */
+async function fetchFromSheet(){
+  const tryGid = async (gid) => {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return parseCSV(await res.text());
+  };
+  try{
+    const [leaveRows, careRows] = await Promise.all([tryGid(GIDS.leave), tryGid(GIDS.care)]);
+    let ok = 0;
+    if(ingestRows(leaveRows, "休暇申請フォーム")) ok++;
+    if(ingestRows(careRows,  "託児時間報告フォーム")) ok++;
+    if(ok){ STATE.loadedAt = new Date(); persist(); refreshAll(); alert("スプレッドシートから取得しました。"); }
+  }catch(err){
+    alert("URLからの自動取得に失敗しました（ブラウザのCORS制限の可能性が高いです）。\n" +
+          "お手数ですが、スプレッドシートを .xlsx / .csv で書き出してファイル読み込みをご利用ください。\n\n詳細：" + err.message);
+  }
+}
+
+/* ============================================================
+   サンプルデータ
+   ============================================================ */
+function loadSample(){
+  const careHeader  = ["タイムスタンプ","報告者","従業員名","開始時間(AM)","終了時間(AM)","開始時間(PM)","終了時間(PM)"];
+  const leaveHeader = ["タイムスタンプ","申請者(フルネーム)","今日の日付","休暇の種類","申請項目","有給開始日","有給終了日"];
+  const careRows = [careHeader];
+  const leaveRows = [leaveHeader];
+  const emps = ["山田花子","佐藤太郎","鈴木みどり"];
+  const months = [{y:2026,m:3},{y:2026,m:4}];
+  for(const mo of months){
+    for(let d=2; d<=24; d+=3){
+      for(const e of emps){
+        const ts = `${mo.y}/${pad2(mo.m)}/${pad2(d)} 9:05:00`;
+        careRows.push([ts,"園長",e,"9:00:00","12:00:00","13:00:00","17:30:00"]);
+      }
+    }
+  }
+  leaveRows.push(["2026/03/10 10:00:00","山田花子","2026/03/10","有給休暇","全日","2026/03/16","2026/03/17"]);
+  leaveRows.push(["2026/03/22 18:00:00","佐藤太郎","2026/03/22","有給休暇","半日","2026/03/25","2026/03/25"]);
+  leaveRows.push(["2026/04/02 08:30:00","鈴木みどり","2026/04/02","欠勤","全日","2026/04/03","2026/04/03"]);
+  leaveRows.push(["2026/04/15 12:00:00","山田花子","2026/04/15","有給休暇","全日","2026/04/20","2026/04/22"]);
+  STATE.care  = rowsToCare(careRows);
+  STATE.leave = rowsToLeave(leaveRows);
+  STATE.loadedAt = new Date();
+  persist(); refreshAll();
+}
+
+/* ============================================================
+   イベント登録
+   ============================================================ */
+function initEvents(){
+  /* タブ切替 */
+  $$("#tabs button").forEach(b => b.addEventListener("click", () => {
+    $$("#tabs button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    $$(".view").forEach(v => v.classList.remove("active"));
+    $("#view-"+b.dataset.view).classList.add("active");
+  }));
+  /* ドロップ */
+  const drop = $("#drop"), fileInput = $("#file");
+  drop.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", e => { handleFiles([...e.target.files]); fileInput.value=""; });
+  ["dragenter","dragover"].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => {
+    if(e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
+  });
+  /* ボタン群 */
+  $("#btn-fetch").addEventListener("click", fetchFromSheet);
+  $("#btn-sample").addEventListener("click", loadSample);
+  $("#btn-clear").addEventListener("click", () => {
+    if(!confirm("読み込み済みデータを消去します。よろしいですか？")) return;
+    STATE.leave=[]; STATE.care=[]; STATE.loadedAt=null;
+    localStorage.removeItem(LS_KEY); refreshAll();
+  });
+  $("#btn-paste-toggle").addEventListener("click", () => {
+    const a = $("#paste-area");
+    a.style.display = a.style.display==="none" ? "block" : "none";
+  });
+  $("#btn-paste-load").addEventListener("click", () => {
+    const txt = $("#paste").value.trim();
+    if(!txt){ alert("貼り付け内容が空です。"); return; }
+    /* タブ区切りにも対応 */
+    const sep = (txt.split("\n")[0].split("\t").length > txt.split("\n")[0].split(",").length) ? "\t" : ",";
+    const rows = sep==="\t"
+      ? txt.replace(/\r/g,"").split("\n").map(l => l.split("\t")).filter(r => r.some(c=>c.trim()!==""))
+      : parseCSV(txt);
+    if(ingestRows(rows, "貼り付けデータ")){
+      STATE.loadedAt = new Date(); persist(); refreshAll();
+      $("#paste").value=""; $("#paste-area").style.display="none";
+    }
+  });
+  $("#sel-month").addEventListener("change", () => {
+    renderDashboard(); renderCare(); renderLeave(); renderDetail(); renderPrintHead();
+  });
+  $("#sel-emp").addEventListener("change", () => {
+    renderDashboard(); renderCare(); renderLeave(); renderDetail(); renderPrintHead();
+  });
+  $("#btn-print").addEventListener("click", () => window.print());
+  $("#btn-csv").addEventListener("click", exportCSV);
+  $("#btn-xls").addEventListener("click", exportXLS);
+}
+
+/* ---- 起動 ---- */
+restore();
+initEvents();
+refreshAll();
+</script>
+</body>
+</html>
