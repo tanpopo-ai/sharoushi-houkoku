@@ -149,7 +149,76 @@
     .kpi .k-val{font-size:17px;}
     a{color:inherit; text-decoration:none;}
   }
+
+/* ====== ジョブカン勤怠タブ用 CSS ====== */
+.subtabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 8px;
+  border-bottom: 2px solid #ccc;
+}
+.subtabs .subtab-btn {
+  border: 1px solid #ccc;
+  border-bottom: none;
+  background: #f5f5f5;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.subtabs .subtab-btn.active {
+  background: #fff;
+  border-color: #999;
+  font-weight: bold;
+  position: relative;
+  top: 1px;
+}
+.indiv-empty {
+  color: #888;
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+.chart-box {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px;
+  height: 420px;
+  margin: 8px 0 16px;
+}
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 4px;
+}
+#tbl-worktime, #tbl-location, #tbl-overtime, #tbl-special,
+#tbl-ovta, #tbl-speca {
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.table-wrap table th, .table-wrap table td {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+}
+.table-wrap table thead th {
+  background: #f0f0f0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.table-wrap table tbody td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#indiv-staff-select {
+  font-size: 14px;
+  padding: 4px 8px;
+  min-width: 260px;
+}
+.loc-honin { background:#e8f4ff; }
+.loc-bunin { background:#fff7e0; }
+.loc-rest  { background:#f0f0f0; color:#888; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -163,6 +232,9 @@
   <button data-view="care">託児時間 月次集計</button>
   <button data-view="leave">休暇申請 月次集計</button>
   <button data-view="detail">明細データ</button>
+  <button data-view="individual">個人別勤務</button>
+  <button data-view="overtime-agg">残業時間集計</button>
+  <button data-view="special-agg">特出時間集計</button>
 </nav>
 
 <main>
@@ -277,6 +349,64 @@
     <div class="panel">
       <h2>休暇申請 ― 明細</h2>
       <div id="leave-detail"></div>
+    </div>
+  </section>
+
+  <!-- ============ ジョブカン: 個人別勤務 ============ -->
+  <section class="view" id="view-individual">
+    <div class="panel">
+      <h2>個人別 勤務記録</h2>
+      <p class="muted">
+        スタッフ選択:
+        <select id="indiv-staff-select"></select>
+        <span id="indiv-loading"></span>
+      </p>
+      <nav id="indiv-subtabs" class="subtabs">
+        <button type="button" class="subtab-btn active" data-subview="worktime">勤務時間</button>
+        <button type="button" class="subtab-btn" data-subview="location">出勤場所</button>
+        <button type="button" class="subtab-btn" data-subview="overtime">残業時間</button>
+        <button type="button" class="subtab-btn" data-subview="special">特出時間</button>
+      </nav>
+      <div class="indiv-subview" id="subview-worktime">
+        <h3>勤務時間</h3>
+        <p class="indiv-empty">スタッフを選択してください。</p>
+        <div class="table-wrap"><table id="tbl-worktime"></table></div>
+      </div>
+      <div class="indiv-subview" id="subview-location" hidden>
+        <h3>出勤場所 (本院 / 分院 / 休み)</h3>
+        <p class="indiv-empty">スタッフを選択してください。</p>
+        <div class="table-wrap"><table id="tbl-location"></table></div>
+      </div>
+      <div class="indiv-subview" id="subview-overtime" hidden>
+        <h3>残業時間 (日次)</h3>
+        <p class="indiv-empty">スタッフを選択してください。</p>
+        <div class="table-wrap"><table id="tbl-overtime"></table></div>
+      </div>
+      <div class="indiv-subview" id="subview-special" hidden>
+        <h3>特出時間 (日次)</h3>
+        <p class="indiv-empty">スタッフを選択してください。</p>
+        <div class="table-wrap"><table id="tbl-special"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ジョブカン: 残業時間集計 ============ -->
+  <section class="view" id="view-overtime-agg">
+    <div class="panel">
+      <h2>残業時間 月別集計 (全スタッフ)</h2>
+      <p class="muted"><span id="ovta-loading">読み込み中...</span></p>
+      <div class="chart-box"><canvas id="chart-ovta"></canvas></div>
+      <div class="table-wrap"><table id="tbl-ovta"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ ジョブカン: 特出時間集計 ============ -->
+  <section class="view" id="view-special-agg">
+    <div class="panel">
+      <h2>特出時間 月別集計 (全スタッフ)</h2>
+      <p class="muted"><span id="speca-loading">読み込み中...</span></p>
+      <div class="chart-box"><canvas id="chart-speca"></canvas></div>
+      <div class="table-wrap"><table id="tbl-speca"></table></div>
     </div>
   </section>
 
@@ -1119,6 +1249,331 @@ function initEvents(){
 restore();
 initEvents();
 refreshAll();
+
+
+/* ========== ジョブカン勤怠統合 (追加) ========== */
+/* =============================================================
+ * ジョブカン勤怠統合: イントラ index.html 用 JavaScript (v2)
+ *
+ * 既存 <script> 末尾、または新規 <script> ブロックとして追加。
+ * Chart.js (UMD) を読み込み済みであること。
+ * ============================================================= */
+
+// ★ Apps Script のウェブアプリURL ★
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzOL_ewbKTl1qlGHhxmYyd5KW11tTaCNs70dB5VaWMUhY2H29Jb_ImZfZzJrRaXoIDnCg/exec";
+
+
+/* ============================================================
+ * ユーティリティ
+ * ============================================================ */
+
+function callApi(action, params) {
+  const url = new URL(APPS_SCRIPT_URL);
+  url.searchParams.set("action", action);
+  if (params) for (const k in params) url.searchParams.set(k, params[k]);
+  return fetch(url.toString(), { method: "GET", redirect: "follow" })
+    .then(r => {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      return data;
+    });
+}
+
+function secondsToHHMM(sec) {
+  sec = Math.max(0, Math.round(Number(sec) || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h + ":" + String(m).padStart(2, "0");
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function isNumericCell(s) {
+  if (s == null) return false;
+  const t = String(s).trim();
+  return /^-?\d+(\.\d+)?$/.test(t) || /^\d+:\d+/.test(t);
+}
+
+
+/* ============================================================
+ * 個人別勤務タブ
+ * ============================================================ */
+
+let _indivStaffListLoaded = false;
+const _indivCache = {};  // { staffName: { header, rows } }
+let _indivCurrentSub = "worktime";
+
+function loadIndivStaffList() {
+  if (_indivStaffListLoaded) return;
+  _indivStaffListLoaded = true;
+
+  const sel = document.getElementById("indiv-staff-select");
+  const loading = document.getElementById("indiv-loading");
+  loading.textContent = "スタッフ一覧読み込み中...";
+
+  callApi("staff_list")
+    .then(data => {
+      loading.textContent = "";
+      sel.innerHTML = '<option value="">(選択してください)</option>';
+      (data.staff || []).forEach(name => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener("change", () => {
+        const name = sel.value;
+        if (name) loadIndivData(name);
+      });
+    })
+    .catch(err => {
+      loading.textContent = "エラー: " + err.message;
+      _indivStaffListLoaded = false;
+    });
+}
+
+function loadIndivData(name) {
+  if (_indivCache[name]) {
+    renderIndivData(_indivCache[name]);
+    return;
+  }
+  const loading = document.getElementById("indiv-loading");
+  loading.textContent = "'" + name + "' の勤怠データ読み込み中...";
+
+  callApi("staff_detail", { name })
+    .then(data => {
+      _indivCache[name] = data;
+      loading.textContent = "";
+      renderIndivData(data);
+    })
+    .catch(err => {
+      loading.textContent = "エラー: " + err.message;
+    });
+}
+
+function findColumn(header, predicate) {
+  for (let i = 0; i < header.length; i++) {
+    if (predicate(String(header[i] || ""))) return i;
+  }
+  return -1;
+}
+
+function renderIndivData(data) {
+  const header = data.header || [];
+  const rows = data.rows || [];
+
+  // 列インデックス検出 (見出しは改行を含む可能性があるため部分一致)
+  const idxDate = findColumn(header, h => h.indexOf("日付") >= 0);
+  const idxKb = findColumn(header, h => h.indexOf("休日区分") >= 0);
+  const idxIn = findColumn(header, h => h.indexOf("出勤") >= 0 && h.indexOf("時刻") >= 0);
+  const idxOut = findColumn(header, h => h.indexOf("退勤") >= 0 && h.indexOf("時刻") >= 0);
+  const idxWork = findColumn(header, h => h.indexOf("実労働") >= 0);
+  const idxLoc = findColumn(header, h => h.indexOf("判定勤務地") >= 0);
+  const idxOver = findColumn(header, h => h === "残業時間");
+  const idxSpec = findColumn(header, h => h === "特出時間");
+
+  // 各サブタブの empty 表示を消す
+  document.querySelectorAll(".indiv-empty").forEach(el => { el.style.display = "none"; });
+
+  // 勤務時間テーブル
+  renderTable("tbl-worktime",
+    ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間"],
+    rows.map(r => [
+      r[idxDate], r[idxKb] || "", r[idxIn] || "", r[idxOut] || "", r[idxWork] || ""
+    ])
+  );
+
+  // 出勤場所テーブル (色分け)
+  renderTable("tbl-location",
+    ["日付", "勤務地"],
+    rows.map(r => [r[idxDate], r[idxLoc] || ""]),
+    (col, val) => {
+      if (col === 1) {
+        if (val === "本院") return "loc-honin";
+        if (val === "分院") return "loc-bunin";
+        if (val === "休み") return "loc-rest";
+      }
+      return "";
+    }
+  );
+
+  // 残業時間テーブル
+  renderTable("tbl-overtime",
+    ["日付", "残業時間"],
+    rows.map(r => [r[idxDate], r[idxOver] || ""]),
+    (col, val) => col === 1 && isNumericCell(val) ? "num" : ""
+  );
+
+  // 特出時間テーブル
+  renderTable("tbl-special",
+    ["日付", "特出時間"],
+    rows.map(r => [r[idxDate], r[idxSpec] || ""]),
+    (col, val) => col === 1 && isNumericCell(val) ? "num" : ""
+  );
+}
+
+function renderTable(tableId, headers, rows, cellClassFn) {
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
+  let html = "<thead><tr>";
+  headers.forEach(h => { html += "<th>" + escapeHtml(h) + "</th>"; });
+  html += "</tr></thead><tbody>";
+  rows.forEach(r => {
+    html += "<tr>";
+    r.forEach((c, ci) => {
+      const v = c == null ? "" : c;
+      const cls = cellClassFn ? cellClassFn(ci, v) : "";
+      html += "<td" + (cls ? " class='" + cls + "'" : "") + ">" + escapeHtml(v) + "</td>";
+    });
+    html += "</tr>";
+  });
+  html += "</tbody>";
+  tbl.innerHTML = html;
+}
+
+function switchIndivSubtab(subName) {
+  _indivCurrentSub = subName;
+  document.querySelectorAll("#indiv-subtabs .subtab-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.subview === subName);
+  });
+  document.querySelectorAll(".indiv-subview").forEach(s => {
+    s.hidden = (s.id !== "subview-" + subName);
+  });
+}
+
+
+/* ============================================================
+ * 残業時間集計 / 特出時間集計
+ * ============================================================ */
+
+let _summaryData = null;
+const _aggCharts = {};
+
+function loadSummary() {
+  if (_summaryData) {
+    renderAggregations();
+    return;
+  }
+  ["ovta-loading", "speca-loading"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = "読み込み中...";
+  });
+
+  callApi("summary")
+    .then(data => {
+      _summaryData = data;
+      ["ovta-loading", "speca-loading"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = "";
+      });
+      renderAggregations();
+    })
+    .catch(err => {
+      ["ovta-loading", "speca-loading"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = "エラー: " + err.message;
+      });
+      _summaryData = null;
+    });
+}
+
+function renderAggregations() {
+  renderAggView("chart-ovta", "tbl-ovta", "残業時間 月別合計", "monthlyOver");
+  renderAggView("chart-speca", "tbl-speca", "特出時間 月別合計", "monthlySpec");
+}
+
+function renderAggView(chartId, tableId, title, fieldKey) {
+  if (!_summaryData) return;
+  const months = _summaryData.months || [];
+  const staff = _summaryData.staff || [];
+
+  // チャート
+  const canvas = document.getElementById(chartId);
+  if (canvas && window.Chart) {
+    if (_aggCharts[chartId]) _aggCharts[chartId].destroy();
+    const colors = [
+      "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
+      "#edc949", "#af7aa1", "#ff9da7", "#9c755f", "#bab0ab",
+    ];
+    const datasets = months.map((ym, mi) => ({
+      label: ym,
+      data: staff.map(s => ((s[fieldKey] || [])[mi] || 0) / 3600),
+      backgroundColor: colors[mi % colors.length],
+    }));
+    _aggCharts[chartId] = new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: { labels: staff.map(s => s.name), datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: { display: true, text: title, font: { size: 14 } },
+          legend: { position: "bottom" },
+          tooltip: {
+            callbacks: {
+              label: ctx => ctx.dataset.label + ": " + secondsToHHMM(ctx.parsed.y * 3600)
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { autoSkip: false, maxRotation: 90, minRotation: 60, font: { size: 9 } } },
+          y: { beginAtZero: true, title: { display: true, text: "時間 (h)" }, ticks: { callback: v => v + "h" } }
+        }
+      }
+    });
+  }
+
+  // 一覧表
+  const tbl = document.getElementById(tableId);
+  if (tbl) {
+    let html = "<thead><tr><th>スタッフ</th>";
+    months.forEach(ym => { html += "<th>" + escapeHtml(ym) + "</th>"; });
+    html += "<th>合計</th></tr></thead><tbody>";
+    staff.forEach(s => {
+      html += "<tr><td>" + escapeHtml(s.name) + "</td>";
+      let total = 0;
+      months.forEach((_, mi) => {
+        const v = (s[fieldKey] || [])[mi] || 0;
+        total += v;
+        html += "<td class='num'>" + secondsToHHMM(v) + "</td>";
+      });
+      html += "<td class='num'><b>" + secondsToHHMM(total) + "</b></td>";
+      html += "</tr>";
+    });
+    html += "</tbody>";
+    tbl.innerHTML = html;
+  }
+}
+
+
+/* ============================================================
+ * イベント結合
+ * ============================================================ */
+
+document.addEventListener("DOMContentLoaded", () => {
+  // タブクリック時にデータ取得
+  const indivBtn = document.querySelector('#tabs button[data-view="individual"]');
+  if (indivBtn) indivBtn.addEventListener("click", loadIndivStaffList);
+
+  const ovtaBtn = document.querySelector('#tabs button[data-view="overtime-agg"]');
+  if (ovtaBtn) ovtaBtn.addEventListener("click", loadSummary);
+
+  const specaBtn = document.querySelector('#tabs button[data-view="special-agg"]');
+  if (specaBtn) specaBtn.addEventListener("click", loadSummary);
+
+  // 個人別 サブタブ切替
+  document.querySelectorAll("#indiv-subtabs .subtab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchIndivSubtab(btn.dataset.subview));
+  });
+});
+
 </script>
 </body>
 </html>
