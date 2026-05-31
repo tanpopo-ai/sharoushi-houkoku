@@ -222,6 +222,31 @@
 .loc-bunin { background:#fff7e0; }
 .loc-rest  { background:#f0f0f0; color:#888; }
 
+/* 年タブ / 月タブ */
+.year-tabs, .month-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.year-tabs button, .month-tabs button {
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.year-tabs button.active, .month-tabs button.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+  font-weight: bold;
+}
+.year-tabs:empty, .month-tabs:empty {
+  display: none;
+}
+
 /* ヘッダリンク */
 .header-links {
   margin-top: 8px;
@@ -383,7 +408,7 @@
   <!-- ============ ジョブカン: 個人別勤務 ============ -->
   <section class="view" id="view-individual">
     <div class="panel">
-      <h2>個人別 勤務記録</h2>
+      <h2>個人別 勤務記録 (日次の最新スナップショットのみ表示)</h2>
       <p class="muted">
         スタッフ検索:
         <input type="search" id="indiv-staff-search" list="indiv-staff-datalist"
@@ -393,32 +418,14 @@
         <select id="indiv-staff-select"></select>
         <span id="indiv-loading"></span>
       </p>
-      <nav id="indiv-subtabs" class="subtabs">
-        <button type="button" class="subtab-btn active" data-subview="worktime">勤務時間</button>
-        <button type="button" class="subtab-btn" data-subview="location">出勤場所</button>
-        <button type="button" class="subtab-btn" data-subview="overtime">残業時間</button>
-        <button type="button" class="subtab-btn" data-subview="special">特出時間</button>
-      </nav>
-      <div class="indiv-subview" id="subview-worktime">
-        <h3>勤務時間</h3>
-        <p class="indiv-empty">スタッフを選択してください。</p>
-        <div class="table-wrap"><table id="tbl-worktime"></table></div>
-      </div>
-      <div class="indiv-subview" id="subview-location" hidden>
-        <h3>出勤場所 (本院 / 分院 / 休み)</h3>
-        <p class="indiv-empty">スタッフを選択してください。</p>
-        <div class="table-wrap"><table id="tbl-location"></table></div>
-      </div>
-      <div class="indiv-subview" id="subview-overtime" hidden>
-        <h3>残業時間 (日次)</h3>
-        <p class="indiv-empty">スタッフを選択してください。</p>
-        <div class="table-wrap"><table id="tbl-overtime"></table></div>
-      </div>
-      <div class="indiv-subview" id="subview-special" hidden>
-        <h3>特出時間 (日次)</h3>
-        <p class="indiv-empty">スタッフを選択してください。</p>
-        <div class="table-wrap"><table id="tbl-special"></table></div>
-      </div>
+
+      <!-- 年タブ (年が複数あるときだけ表示) -->
+      <nav id="indiv-year-tabs" class="year-tabs"></nav>
+      <!-- 月タブ -->
+      <nav id="indiv-month-tabs" class="month-tabs"></nav>
+
+      <p class="indiv-empty" id="indiv-empty-msg">スタッフを選択してください。</p>
+      <div class="table-wrap"><table id="tbl-combined"></table></div>
     </div>
   </section>
 
@@ -1340,7 +1347,6 @@ function isNumericCell(s) {
 
 let _indivStaffListLoaded = false;
 const _indivCache = {};  // { staffName: { header, rows } }
-let _indivCurrentSub = "worktime";
 
 function loadIndivStaffList() {
   if (_indivStaffListLoaded) return;
@@ -1441,58 +1447,173 @@ function findColumn(header, predicate) {
   return -1;
 }
 
+// グループ化された状態: { "2026": { "5": [rows...], "6": [rows...] }, ... }
+let _indivGrouped = null;
+let _indivCurrentYear = null;
+let _indivCurrentMonth = null;
+let _indivColIdx = null;  // 列インデックスのキャッシュ
+
 function renderIndivData(data) {
   const header = data.header || [];
   const rows = data.rows || [];
 
-  // 列インデックス検出 (見出しは改行を含む可能性があるため部分一致)
-  const idxDate = findColumn(header, h => h.indexOf("日付") >= 0);
-  const idxKb = findColumn(header, h => h.indexOf("休日区分") >= 0);
-  const idxIn = findColumn(header, h => h.indexOf("出勤") >= 0 && h.indexOf("時刻") >= 0);
-  const idxOut = findColumn(header, h => h.indexOf("退勤") >= 0 && h.indexOf("時刻") >= 0);
-  const idxWork = findColumn(header, h => h.indexOf("実労働") >= 0);
-  const idxLoc = findColumn(header, h => h.indexOf("判定勤務地") >= 0);
-  const idxOver = findColumn(header, h => h === "残業時間");
-  const idxSpec = findColumn(header, h => h === "特出時間");
+  // 列インデックスを検出 (見出しは改行を含む可能性があるため部分一致)
+  _indivColIdx = {
+    acq: findColumn(header, h => h.indexOf("取得日時") >= 0),
+    date: findColumn(header, h => h.indexOf("日付") >= 0),
+    kb: findColumn(header, h => h.indexOf("休日区分") >= 0),
+    in: findColumn(header, h => h.indexOf("出勤") >= 0 && h.indexOf("時刻") >= 0),
+    out: findColumn(header, h => h.indexOf("退勤") >= 0 && h.indexOf("時刻") >= 0),
+    work: findColumn(header, h => h.indexOf("実労働") >= 0),
+    loc: findColumn(header, h => h.indexOf("判定勤務地") >= 0),
+    over: findColumn(header, h => h === "残業時間"),
+    spec: findColumn(header, h => h === "特出時間"),
+  };
 
-  // 各サブタブの empty 表示を消す
-  document.querySelectorAll(".indiv-empty").forEach(el => { el.style.display = "none"; });
+  // 年・月でグループ化
+  // 年は取得日時から / 月は日付列 (例: "05/01(金)") から抽出
+  // 合計行 (日付に "合計" を含む) は その月のグループに含める
+  _indivGrouped = {};
+  for (const r of rows) {
+    const dateStr = String(r[_indivColIdx.date] || "");
+    const acq = String(r[_indivColIdx.acq] || "");
+    if (!dateStr) continue;
 
-  // 勤務時間テーブル
-  renderTable("tbl-worktime",
-    ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間"],
-    rows.map(r => [
-      r[idxDate], r[idxKb] || "", r[idxIn] || "", r[idxOut] || "", r[idxWork] || ""
-    ])
-  );
-
-  // 出勤場所テーブル (色分け)
-  renderTable("tbl-location",
-    ["日付", "勤務地"],
-    rows.map(r => [r[idxDate], r[idxLoc] || ""]),
-    (col, val) => {
-      if (col === 1) {
-        if (val === "本院") return "loc-honin";
-        if (val === "分院") return "loc-bunin";
-        if (val === "休み") return "loc-rest";
-      }
-      return "";
+    const year = acq.substring(0, 4) || "?";
+    let month;
+    if (dateStr.indexOf("合計") >= 0) {
+      // 合計行は、最後に処理した月にぶら下げる (後で対応)
+      month = "合計";
+    } else {
+      const m = dateStr.match(/(\d+)\//);
+      month = m ? String(parseInt(m[1], 10)) : "?";
     }
-  );
+    if (!_indivGrouped[year]) _indivGrouped[year] = {};
+    if (!_indivGrouped[year][month]) _indivGrouped[year][month] = [];
+    _indivGrouped[year][month].push(r);
+  }
 
-  // 残業時間テーブル
-  renderTable("tbl-overtime",
-    ["日付", "残業時間"],
-    rows.map(r => [r[idxDate], r[idxOver] || ""]),
-    (col, val) => col === 1 && isNumericCell(val) ? "num" : ""
-  );
+  // 合計行を該当する月にマージ (合計行のみ存在する年月に対応)
+  // 上記でmonth="合計"として別グループに入れていたが、合計行はその月内で最後に表示すべき。
+  // ここでは合計行を、その年で最も大きい数字の月に追加する。
+  for (const year of Object.keys(_indivGrouped)) {
+    const sums = _indivGrouped[year]["合計"];
+    if (sums && sums.length > 0) {
+      // 数字月の最大を取得
+      const numMonths = Object.keys(_indivGrouped[year]).filter(m => m !== "合計").map(Number);
+      if (numMonths.length > 0) {
+        const maxMonth = String(Math.max(...numMonths));
+        _indivGrouped[year][maxMonth] = _indivGrouped[year][maxMonth].concat(sums);
+      }
+      delete _indivGrouped[year]["合計"];
+    }
+  }
 
-  // 特出時間テーブル
-  renderTable("tbl-special",
-    ["日付", "特出時間"],
-    rows.map(r => [r[idxDate], r[idxSpec] || ""]),
-    (col, val) => col === 1 && isNumericCell(val) ? "num" : ""
-  );
+  // emptyメッセージを消す
+  const emptyMsg = document.getElementById("indiv-empty-msg");
+  if (emptyMsg) emptyMsg.style.display = "none";
+
+  // 最新の年・月をデフォルト選択 (取得日時の最新月を使う)
+  const years = Object.keys(_indivGrouped).sort();
+  if (years.length === 0) {
+    document.getElementById("tbl-combined").innerHTML = "";
+    return;
+  }
+  _indivCurrentYear = years[years.length - 1];
+  const months = Object.keys(_indivGrouped[_indivCurrentYear]).map(Number).sort((a, b) => a - b);
+  _indivCurrentMonth = String(months[months.length - 1]);
+
+  renderYearTabs();
+  renderMonthTabs();
+  renderCombinedTable();
+}
+
+function renderYearTabs() {
+  const nav = document.getElementById("indiv-year-tabs");
+  if (!nav || !_indivGrouped) return;
+  const years = Object.keys(_indivGrouped).sort();
+  // 1年しかなければ非表示
+  if (years.length <= 1) {
+    nav.innerHTML = "";
+    return;
+  }
+  let html = "";
+  years.forEach(y => {
+    const cls = y === _indivCurrentYear ? "active" : "";
+    html += '<button type="button" class="' + cls + '" data-year="' + escapeHtml(y) + '">' + escapeHtml(y) + '年</button>';
+  });
+  nav.innerHTML = html;
+  nav.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _indivCurrentYear = btn.dataset.year;
+      // 月リセット (新しい年内で最新月選択)
+      const months = Object.keys(_indivGrouped[_indivCurrentYear]).map(Number).sort((a, b) => a - b);
+      _indivCurrentMonth = String(months[months.length - 1]);
+      renderYearTabs();
+      renderMonthTabs();
+      renderCombinedTable();
+    });
+  });
+}
+
+function renderMonthTabs() {
+  const nav = document.getElementById("indiv-month-tabs");
+  if (!nav || !_indivGrouped || !_indivCurrentYear) return;
+  const yearData = _indivGrouped[_indivCurrentYear] || {};
+  const months = Object.keys(yearData).map(Number).sort((a, b) => a - b);
+  if (months.length <= 1) {
+    // 月が1つだけならタブは非表示 (どうせ自動的にそれを表示する)
+    nav.innerHTML = "";
+    return;
+  }
+  let html = "";
+  months.forEach(m => {
+    const ms = String(m);
+    const cls = ms === _indivCurrentMonth ? "active" : "";
+    html += '<button type="button" class="' + cls + '" data-month="' + ms + '">' + ms + '月</button>';
+  });
+  nav.innerHTML = html;
+  nav.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _indivCurrentMonth = btn.dataset.month;
+      renderMonthTabs();
+      renderCombinedTable();
+    });
+  });
+}
+
+function renderCombinedTable() {
+  if (!_indivGrouped || !_indivCurrentYear || !_indivCurrentMonth) return;
+  const yearData = _indivGrouped[_indivCurrentYear] || {};
+  const rows = yearData[_indivCurrentMonth] || [];
+  const idx = _indivColIdx;
+
+  // 統合表: 日付 | 休日区分 | 出勤時刻 | 退勤時刻 | 実労働時間 | 出勤場所 | 残業時間 | 特出時間
+  const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間", "出勤場所", "残業時間", "特出時間"];
+  const tableRows = rows.map(r => [
+    r[idx.date] || "",
+    r[idx.kb] || "",
+    r[idx.in] || "",
+    r[idx.out] || "",
+    r[idx.work] || "",
+    r[idx.loc] || "",
+    r[idx.over] || "",
+    r[idx.spec] || "",
+  ]);
+
+  renderTable("tbl-combined", headers, tableRows, (col, val) => {
+    // 出勤場所列 (5): 本院/分院/休み の色分け
+    if (col === 5) {
+      if (val === "本院") return "loc-honin";
+      if (val === "分院") return "loc-bunin";
+      if (val === "休み") return "loc-rest";
+    }
+    // 時刻列 (2,3,4,6,7) は右寄せ
+    if (col === 2 || col === 3 || col === 4 || col === 6 || col === 7) {
+      return isNumericCell(val) ? "num" : "";
+    }
+    return "";
+  });
 }
 
 function renderTable(tableId, headers, rows, cellClassFn) {
@@ -1514,15 +1635,7 @@ function renderTable(tableId, headers, rows, cellClassFn) {
   tbl.innerHTML = html;
 }
 
-function switchIndivSubtab(subName) {
-  _indivCurrentSub = subName;
-  document.querySelectorAll("#indiv-subtabs .subtab-btn").forEach(b => {
-    b.classList.toggle("active", b.dataset.subview === subName);
-  });
-  document.querySelectorAll(".indiv-subview").forEach(s => {
-    s.hidden = (s.id !== "subview-" + subName);
-  });
-}
+// (旧 switchIndivSubtab は廃止: 4サブタブ → 年/月タブ + 統合表 に置き換え)
 
 
 /* ============================================================
@@ -1644,10 +1757,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const specaBtn = document.querySelector('#tabs button[data-view="special-agg"]');
   if (specaBtn) specaBtn.addEventListener("click", loadSummary);
 
-  // 個人別 サブタブ切替
-  document.querySelectorAll("#indiv-subtabs .subtab-btn").forEach(btn => {
-    btn.addEventListener("click", () => switchIndivSubtab(btn.dataset.subview));
-  });
+  // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 
   // ========== ページ読み込み時に自動取得 ==========
   // 1) ジョブカン関連: スタッフ一覧 + 集計データを事前読み込み
