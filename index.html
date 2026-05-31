@@ -209,14 +209,36 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-#indiv-staff-select {
+#indiv-staff-select, #indiv-staff-search {
   font-size: 14px;
   padding: 4px 8px;
-  min-width: 260px;
+  min-width: 240px;
+}
+#indiv-staff-search {
+  border: 1px solid #999;
+  border-radius: 4px;
 }
 .loc-honin { background:#e8f4ff; }
 .loc-bunin { background:#fff7e0; }
 .loc-rest  { background:#f0f0f0; color:#888; }
+
+/* ヘッダリンク */
+.header-links {
+  margin-top: 8px;
+}
+.header-links .ext-link {
+  display: inline-block;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 20px;
+  text-decoration: none;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.header-links .ext-link:hover {
+  background: rgba(255,255,255,0.3);
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -225,6 +247,12 @@
 <header class="site">
   <h1>社労士報告イントラ</h1>
   <div class="sub">休暇申請・託児時間報告の集約 ／ 月次レポート出力ツール</div>
+  <div class="header-links">
+    <a href="https://docs.google.com/spreadsheets/d/1u5_a39MXF4SkbMH0sp9lsVLCJH67aSvE-8J_wQ3RSY8/edit"
+       target="_blank" rel="noopener noreferrer" class="ext-link">
+       📊 ジョブカン勤怠ログ (スプレッドシート)
+    </a>
+  </div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -357,7 +385,11 @@
     <div class="panel">
       <h2>個人別 勤務記録</h2>
       <p class="muted">
-        スタッフ選択:
+        スタッフ検索:
+        <input type="search" id="indiv-staff-search" list="indiv-staff-datalist"
+               placeholder="氏名の一部を入力 (例: 廣海, 藤門)" autocomplete="off" />
+        <datalist id="indiv-staff-datalist"></datalist>
+        または:
         <select id="indiv-staff-select"></select>
         <span id="indiv-loading"></span>
       </p>
@@ -1315,23 +1347,67 @@ function loadIndivStaffList() {
   _indivStaffListLoaded = true;
 
   const sel = document.getElementById("indiv-staff-select");
+  const datalist = document.getElementById("indiv-staff-datalist");
+  const searchInput = document.getElementById("indiv-staff-search");
   const loading = document.getElementById("indiv-loading");
   loading.textContent = "スタッフ一覧読み込み中...";
 
   callApi("staff_list")
     .then(data => {
       loading.textContent = "";
+      const staffList = data.staff || [];
+
+      // ドロップダウン
       sel.innerHTML = '<option value="">(選択してください)</option>';
-      (data.staff || []).forEach(name => {
+      staffList.forEach(name => {
         const opt = document.createElement("option");
         opt.value = name;
         opt.textContent = name;
         sel.appendChild(opt);
       });
+
+      // datalist (検索用オートコンプリート)
+      if (datalist) {
+        datalist.innerHTML = "";
+        staffList.forEach(name => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          datalist.appendChild(opt);
+        });
+      }
+
+      // ドロップダウン: 選択時にデータ読み込み + 検索ボックスにも同期
       sel.addEventListener("change", () => {
         const name = sel.value;
-        if (name) loadIndivData(name);
+        if (name) {
+          if (searchInput) searchInput.value = name;
+          loadIndivData(name);
+        }
       });
+
+      // 検索ボックス: 確定 (Enter or datalist選択) でデータ読み込み
+      if (searchInput) {
+        const tryLoad = () => {
+          const v = searchInput.value.trim();
+          if (!v) return;
+          // 完全一致するスタッフを優先
+          let target = staffList.find(s => s === v);
+          // 部分一致 (1件に絞れる場合のみ採用)
+          if (!target) {
+            const matched = staffList.filter(s => s.includes(v));
+            if (matched.length === 1) target = matched[0];
+          }
+          if (target) {
+            searchInput.value = target;
+            sel.value = target;
+            loadIndivData(target);
+          }
+        };
+        searchInput.addEventListener("change", tryLoad);
+        searchInput.addEventListener("keydown", e => {
+          if (e.key === "Enter") { e.preventDefault(); tryLoad(); }
+        });
+      }
     })
     .catch(err => {
       loading.textContent = "エラー: " + err.message;
@@ -1558,7 +1634,7 @@ function renderAggView(chartId, tableId, title, fieldKey) {
  * ============================================================ */
 
 document.addEventListener("DOMContentLoaded", () => {
-  // タブクリック時にデータ取得
+  // タブクリック時にデータ取得 (フォールバック: 自動取得失敗時)
   const indivBtn = document.querySelector('#tabs button[data-view="individual"]');
   if (indivBtn) indivBtn.addEventListener("click", loadIndivStaffList);
 
@@ -1572,6 +1648,23 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("#indiv-subtabs .subtab-btn").forEach(btn => {
     btn.addEventListener("click", () => switchIndivSubtab(btn.dataset.subview));
   });
+
+  // ========== ページ読み込み時に自動取得 ==========
+  // 1) ジョブカン関連: スタッフ一覧 + 集計データを事前読み込み
+  //    (タブクリック前にデータを準備しておくことで体感速度向上)
+  setTimeout(() => {
+    try { loadIndivStaffList(); } catch (e) { console.warn("auto-load indiv staff failed:", e); }
+    try { loadSummary(); } catch (e) { console.warn("auto-load summary failed:", e); }
+  }, 100);
+
+  // 2) 既存の託児/休暇データの直接取得を自動起動
+  //    (元々あった「スプレッドシートから直接取得を試す」ボタンを自動押下)
+  setTimeout(() => {
+    const fetchBtn = document.getElementById("btn-fetch");
+    if (fetchBtn) {
+      try { fetchBtn.click(); } catch (e) { console.warn("auto-fetch failed:", e); }
+    }
+  }, 500);
 });
 
 </script>
