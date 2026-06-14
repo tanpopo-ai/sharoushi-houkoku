@@ -906,6 +906,10 @@ function refreshAll(){
   renderLeave();
   renderDetail();
   renderPrintHead();
+  // 託児データ読み込み後、個人別勤務表が表示中なら託児利用時間列を再描画
+  if (typeof renderCombinedTable === "function" && _indivGrouped) {
+    try { renderCombinedTable(); } catch (e) { /* noop */ }
+  }
 }
 
 function renderStatus(){
@@ -1452,10 +1456,41 @@ let _indivGrouped = null;
 let _indivCurrentYear = null;
 let _indivCurrentMonth = null;
 let _indivColIdx = null;  // 列インデックスのキャッシュ
+let _indivStaffName = ""; // 選択中スタッフの氏名 (コード抜き、託児データ突合用)
+
+// 氏名の正規化 (空白除去) — 託児フォームと勤怠で表記揺れがあっても突合できるように
+function normNameForMatch(s) {
+  return String(s == null ? "" : s).replace(/[\s　]/g, "");
+}
+
+// 小数時間 → "H:MM"
+function hoursToHHMM(h) {
+  const total = Math.round((Number(h) || 0) * 60);
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return hh + ":" + String(mm).padStart(2, "0");
+}
+
+// 指定スタッフ・年月日の託児利用時間(小数h)を STATE.care から合算
+function careHoursFor(year, month, day) {
+  const target = normNameForMatch(_indivStaffName);
+  if (!target || typeof STATE === "undefined" || !Array.isArray(STATE.care)) return 0;
+  let sum = 0;
+  for (const c of STATE.care) {
+    if (c.date && c.date.y === year && c.date.m === month && c.date.d === day &&
+        normNameForMatch(c.employee) === target) {
+      sum += (c.hours || 0);
+    }
+  }
+  return sum;
+}
 
 function renderIndivData(data) {
   const header = data.header || [];
   const rows = data.rows || [];
+
+  // 選択中スタッフ名 (コード抜き) を保持
+  _indivStaffName = String(data.name || "").replace(/\s*[\(（].*$/, "").trim();
 
   // 列インデックスを検出 (見出しは改行を含む可能性があるため部分一致)
   _indivColIdx = {
@@ -1588,18 +1623,47 @@ function renderCombinedTable() {
   const rows = yearData[_indivCurrentMonth] || [];
   const idx = _indivColIdx;
 
-  // 統合表: 日付 | 休日区分 | 出勤時刻 | 退勤時刻 | 実労働時間 | 出勤場所 | 残業時間 | 特出時間
-  const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間", "出勤場所", "残業時間", "特出時間"];
-  const tableRows = rows.map(r => [
-    r[idx.date] || "",
-    r[idx.kb] || "",
-    r[idx.in] || "",
-    r[idx.out] || "",
-    r[idx.work] || "",
-    r[idx.loc] || "",
-    r[idx.over] || "",
-    r[idx.spec] || "",
-  ]);
+  // 統合表: 日付 | 休日区分 | 出勤時刻 | 退勤時刻 | 実労働時間 | 出勤場所 | 残業時間 | 特出時間 | 託児利用時間
+  const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間", "出勤場所", "残業時間", "特出時間", "託児利用時間"];
+  const year = parseInt(_indivCurrentYear, 10);
+  let careMonthTotal = 0;
+
+  const tableRows = rows.map(r => {
+    const dateStr = String(r[idx.date] || "");
+    // 託児利用時間: 日付 "MM/DD(曜)" から日を取り出して STATE.care と突合
+    let careStr = "";
+    const dm = dateStr.match(/(\d+)\/(\d+)/);
+    if (dm) {
+      const mm = parseInt(dm[1], 10);
+      const dd = parseInt(dm[2], 10);
+      const h = careHoursFor(year, mm, dd);
+      if (h > 0) {
+        careStr = hoursToHHMM(h);
+        careMonthTotal += h;
+      }
+    } else if (dateStr.indexOf("合計") >= 0) {
+      // 合計行には月合計を入れる (この後で上書き)
+      careStr = "__MONTH_TOTAL__";
+    }
+    return [
+      r[idx.date] || "",
+      r[idx.kb] || "",
+      r[idx.in] || "",
+      r[idx.out] || "",
+      r[idx.work] || "",
+      r[idx.loc] || "",
+      r[idx.over] || "",
+      r[idx.spec] || "",
+      careStr,
+    ];
+  });
+
+  // 合計行の託児利用時間を月合計で確定
+  tableRows.forEach(tr => {
+    if (tr[8] === "__MONTH_TOTAL__") {
+      tr[8] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
+    }
+  });
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
     // 出勤場所列 (5): 本院/分院/休み の色分け
@@ -1608,8 +1672,8 @@ function renderCombinedTable() {
       if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
-    // 時刻列 (2,3,4,6,7) は右寄せ
-    if (col === 2 || col === 3 || col === 4 || col === 6 || col === 7) {
+    // 時刻列 (2,3,4,6,7,8) は右寄せ
+    if (col === 2 || col === 3 || col === 4 || col === 6 || col === 7 || col === 8) {
       return isNumericCell(val) ? "num" : "";
     }
     return "";
