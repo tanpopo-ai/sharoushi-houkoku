@@ -1842,25 +1842,23 @@ function renderIndivExtras(rows, year, month) {
   });
   grid += '</div>';
 
-  // --- 土日出勤手当: 土曜と日曜の両方に出勤した週末の該当出勤日数 ---
-  // 連続する (土, その翌日=日) の両方が出勤なら、その2日を該当日数としてカウント
-  let weekendAllowanceDays = 0;
+  // --- 土日出勤評価加算日数 ---
+  // 基本ルール: 土日のどちらか1日は出勤。両方出勤した週末1回につき +1。
+  // 例: 土日両方出勤の週が1回→+1、2回→+2。
   let bothWeekends = 0;
   Object.keys(satWorked).forEach(satDayStr => {
     const satDay = parseInt(satDayStr, 10);
     const sunDay = satDay + 1;  // 土曜の翌日は日曜
     if (sunWorked[sunDay]) {
       bothWeekends++;
-      weekendAllowanceDays += 2;  // 土・日の2日を該当日数に
     }
   });
 
-  const allowCls = weekendAllowanceDays > 0 ? "weekend-allowance" : "weekend-allowance zero";
+  const allowCls = bothWeekends > 0 ? "weekend-allowance" : "weekend-allowance zero";
   const allowHtml =
     '<span class="' + allowCls + '">' +
-    '<span class="extras-label">土日出勤手当 該当</span>' +
-    '<b>' + weekendAllowanceDays + '</b> 日' +
-    (bothWeekends > 0 ? '（' + bothWeekends + '週末）' : '') +
+    '<span class="extras-label">土日出勤評価加算日数</span>' +
+    '<b>' + bothWeekends + '</b> 日' +
     '</span>';
 
   const extras = document.getElementById("indiv-extras");
