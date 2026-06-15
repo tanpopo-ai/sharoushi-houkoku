@@ -985,10 +985,12 @@ function refreshAll(){
   renderLeave();
   renderDetail();
   renderPrintHead();
-  // 託児データ読み込み後、個人別勤務表が表示中なら託児利用時間列を再描画
-  if (typeof renderCombinedTable === "function" && _indivGrouped) {
-    try { renderCombinedTable(); } catch (e) { /* noop */ }
-  }
+  // 託児データ読み込み後、個人別勤務表が表示中なら託児利用時間列を再描画。
+  // _indivGrouped は後方で let 宣言のため、初期化前(TDZ)に参照すると例外になる。
+  // 条件参照ごと try/catch で囲って初期ロード時の例外を防ぐ。
+  try {
+    if (_indivGrouped) renderCombinedTable();
+  } catch (e) { /* 初期化前 or 未表示時は無視 */ }
 }
 
 function renderStatus(){
