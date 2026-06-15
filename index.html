@@ -222,6 +222,80 @@
 .loc-bunin { background:#cce8ff; }   /* 分院: 水色 */
 .loc-rest  { background:#e0e0e0; color:#666; }  /* 休み: グレー */
 
+/* 託児利用バッジ (名前のすぐ右) */
+#indiv-care-badge .care-on {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 10px;
+  background: #ffe3ef;
+  border: 1px solid #ff9ec4;
+  border-radius: 14px;
+  font-size: 12px;
+  color: #c2185b;
+  font-weight: bold;
+}
+#indiv-care-badge .care-fee {
+  margin-left: 6px;
+  color: #333;
+  font-weight: normal;
+}
+
+/* サマリー領域 (曜日グリッド + 土日手当) */
+.indiv-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin: 10px 0;
+}
+.indiv-extras:empty { display: none; }
+
+/* 曜日グリッド */
+.weekday-grid {
+  display: inline-flex;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.weekday-grid .wd-cell {
+  width: 38px;
+  text-align: center;
+  font-size: 12px;
+  border-right: 1px solid #ddd;
+}
+.weekday-grid .wd-cell:last-child { border-right: none; }
+.weekday-grid .wd-head {
+  padding: 3px 0;
+  background: #f0f0f0;
+  font-weight: bold;
+  border-bottom: 1px solid #ddd;
+}
+.weekday-grid .wd-head.sat { color:#1565c0; }
+.weekday-grid .wd-head.sun { color:#c62828; }
+.weekday-grid .wd-body { padding: 5px 0; min-height: 22px; }
+.weekday-grid .wd-body.worked { background:#c8e6c9; font-weight:bold; }
+.weekday-grid .wd-body.off { color:#bbb; }
+
+/* 土日出勤手当 */
+.weekend-allowance {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff3e0;
+  border: 1px solid #ffb74d;
+}
+.weekend-allowance.zero {
+  background: #f5f5f5;
+  border-color: #ddd;
+  color: #888;
+}
+.weekend-allowance b { color:#e65100; font-size: 15px; }
+.extras-label { font-size: 12px; color:#666; margin-right: 4px; }
+
+/* 休暇セル */
+.leave-cell { background:#ede7f6; color:#5e35b1; font-weight:bold; }
+
 /* 年タブ / 月タブ */
 .year-tabs, .month-tabs {
   display: flex;
@@ -417,7 +491,12 @@
         または:
         <select id="indiv-staff-select"></select>
         <span id="indiv-loading"></span>
+        <!-- 名前のすぐ右: 託児利用バッジ -->
+        <span id="indiv-care-badge"></span>
       </p>
+
+      <!-- サマリー: 曜日グリッド + 土日出勤手当 -->
+      <div id="indiv-extras" class="indiv-extras"></div>
 
       <!-- 年タブ (年が複数あるときだけ表示) -->
       <nav id="indiv-year-tabs" class="year-tabs"></nav>
@@ -906,6 +985,10 @@ function refreshAll(){
   renderLeave();
   renderDetail();
   renderPrintHead();
+  // 託児データ読み込み後、個人別勤務表が表示中なら託児利用時間列を再描画
+  if (typeof renderCombinedTable === "function" && _indivGrouped) {
+    try { renderCombinedTable(); } catch (e) { /* noop */ }
+  }
 }
 
 function renderStatus(){
@@ -1452,10 +1535,75 @@ let _indivGrouped = null;
 let _indivCurrentYear = null;
 let _indivCurrentMonth = null;
 let _indivColIdx = null;  // 列インデックスのキャッシュ
+let _indivStaffName = ""; // 選択中スタッフの氏名 (コード抜き、託児データ突合用)
+
+// 氏名の正規化 (空白除去) — 託児フォームと勤怠で表記揺れがあっても突合できるように
+function normNameForMatch(s) {
+  return String(s == null ? "" : s).replace(/[\s　]/g, "");
+}
+
+// 小数時間 → "H:MM"
+function hoursToHHMM(h) {
+  const total = Math.round((Number(h) || 0) * 60);
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return hh + ":" + String(mm).padStart(2, "0");
+}
+
+// 指定スタッフ・年月日の託児利用時間(小数h)を STATE.care から合算
+function careHoursFor(year, month, day) {
+  const target = normNameForMatch(_indivStaffName);
+  if (!target || typeof STATE === "undefined" || !Array.isArray(STATE.care)) return 0;
+  let sum = 0;
+  for (const c of STATE.care) {
+    if (c.date && c.date.y === year && c.date.m === month && c.date.d === day &&
+        normNameForMatch(c.employee) === target) {
+      sum += (c.hours || 0);
+    }
+  }
+  return sum;
+}
+
+// 指定スタッフ・指定年月の託児利用時間合計(小数h)
+function careMonthHours(year, month) {
+  const target = normNameForMatch(_indivStaffName);
+  if (!target || typeof STATE === "undefined" || !Array.isArray(STATE.care)) return 0;
+  let sum = 0;
+  for (const c of STATE.care) {
+    if (c.date && c.date.y === year && c.date.m === month &&
+        normNameForMatch(c.employee) === target) {
+      sum += (c.hours || 0);
+    }
+  }
+  return sum;
+}
+
+// ymd を比較用の数値に
+function ymdNum(o) { return o ? o.y * 10000 + o.m * 100 + o.d : 0; }
+
+// 指定スタッフ・年月日に休暇申請があれば表示文字列を返す (なければ "")
+function leaveForDate(year, month, day) {
+  const target = normNameForMatch(_indivStaffName);
+  if (!target || typeof STATE === "undefined" || !Array.isArray(STATE.leave)) return "";
+  const d = year * 10000 + month * 100 + day;
+  for (const lv of STATE.leave) {
+    if (normNameForMatch(lv.applicant) !== target) continue;
+    const s = ymdNum(lv.start || lv.today || lv.ts);
+    const e = ymdNum(lv.end || lv.start || lv.today || lv.ts);
+    if (s && d >= s && d <= (e || s)) {
+      // 申請項目(全休/半休) を優先、なければ種類(有給/慶弔...) 、それも無ければ "休"
+      return lv.item || lv.kind || "休";
+    }
+  }
+  return "";
+}
 
 function renderIndivData(data) {
   const header = data.header || [];
   const rows = data.rows || [];
+
+  // 選択中スタッフ名 (コード抜き) を保持
+  _indivStaffName = String(data.name || "").replace(/\s*[\(（].*$/, "").trim();
 
   // 列インデックスを検出 (見出しは改行を含む可能性があるため部分一致)
   _indivColIdx = {
@@ -1587,19 +1735,48 @@ function renderCombinedTable() {
   const yearData = _indivGrouped[_indivCurrentYear] || {};
   const rows = yearData[_indivCurrentMonth] || [];
   const idx = _indivColIdx;
+  const year = parseInt(_indivCurrentYear, 10);
 
-  // 統合表: 日付 | 休日区分 | 出勤時刻 | 退勤時刻 | 実労働時間 | 出勤場所 | 残業時間 | 特出時間
-  const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間", "出勤場所", "残業時間", "特出時間"];
-  const tableRows = rows.map(r => [
-    r[idx.date] || "",
-    r[idx.kb] || "",
-    r[idx.in] || "",
-    r[idx.out] || "",
-    r[idx.work] || "",
-    r[idx.loc] || "",
-    r[idx.over] || "",
-    r[idx.spec] || "",
-  ]);
+  // 統合表:
+  //  0日付 1休日区分 2出勤時刻 3退勤時刻 4実労働時間 5出勤場所 6休暇 7残業時間 8特出時間 9託児利用時間
+  const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間",
+                   "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間"];
+  let careMonthTotal = 0;
+
+  const tableRows = rows.map(r => {
+    const dateStr = String(r[idx.date] || "");
+    let careStr = "";
+    let leaveStr = "";
+    const dm = dateStr.match(/(\d+)\/(\d+)/);
+    if (dm) {
+      const mm = parseInt(dm[1], 10);
+      const dd = parseInt(dm[2], 10);
+      const h = careHoursFor(year, mm, dd);
+      if (h > 0) { careStr = hoursToHHMM(h); careMonthTotal += h; }
+      leaveStr = leaveForDate(year, mm, dd);
+    } else if (dateStr.indexOf("合計") >= 0) {
+      careStr = "__MONTH_TOTAL__";
+    }
+    return [
+      r[idx.date] || "",
+      r[idx.kb] || "",
+      r[idx.in] || "",
+      r[idx.out] || "",
+      r[idx.work] || "",
+      r[idx.loc] || "",
+      leaveStr,
+      r[idx.over] || "",
+      r[idx.spec] || "",
+      careStr,
+    ];
+  });
+
+  // 合計行の託児利用時間を月合計で確定
+  tableRows.forEach(tr => {
+    if (tr[9] === "__MONTH_TOTAL__") {
+      tr[9] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
+    }
+  });
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
     // 出勤場所列 (5): 本院/分院/休み の色分け
@@ -1608,12 +1785,103 @@ function renderCombinedTable() {
       if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
-    // 時刻列 (2,3,4,6,7) は右寄せ
-    if (col === 2 || col === 3 || col === 4 || col === 6 || col === 7) {
+    // 休暇列 (6): 申請があれば色付け
+    if (col === 6) {
+      return val ? "leave-cell" : "";
+    }
+    // 時刻列 (2,3,4,7,8,9) は右寄せ
+    if (col === 2 || col === 3 || col === 4 || col === 7 || col === 8 || col === 9) {
       return isNumericCell(val) ? "num" : "";
     }
     return "";
   });
+
+  // サマリー (託児バッジ / 曜日グリッド / 土日出勤手当) を描画
+  renderIndivExtras(rows, year, parseInt(_indivCurrentMonth, 10));
+}
+
+/* ============================================================
+ * 個人別サマリー: 託児バッジ / 曜日グリッド / 土日出勤手当
+ * ============================================================ */
+function renderIndivExtras(rows, year, month) {
+  // --- 出勤判定: 出勤場所(判定勤務地)が 本院/分院 なら出勤 ---
+  const idx = _indivColIdx;
+  const WD = ["月", "火", "水", "木", "金", "土", "日"];
+  const wdWorked = [0, 0, 0, 0, 0, 0, 0];  // 各曜日の出勤回数
+  const satWorked = {};  // 日 -> true (土曜出勤)
+  const sunWorked = {};  // 日 -> true (日曜出勤)
+
+  rows.forEach(r => {
+    const dateStr = String(r[idx.date] || "");
+    const dm = dateStr.match(/(\d+)\/(\d+)\((.)\)/);  // "06/01(月)"
+    if (!dm) return;
+    const dd = parseInt(dm[2], 10);
+    const wd = dm[3];  // 曜日文字
+    const loc = String(r[idx.loc] || "");
+    const worked = (loc === "本院" || loc === "分院");
+    if (!worked) return;
+    const wi = WD.indexOf(wd);
+    if (wi >= 0) wdWorked[wi]++;
+    if (wd === "土") satWorked[dd] = true;
+    if (wd === "日") sunWorked[dd] = true;
+  });
+
+  // --- 曜日グリッド HTML (曜日ごとに 見出し+出勤回数 の縦セル) ---
+  let grid = '<div class="weekday-grid">';
+  WD.forEach((w, i) => {
+    const headCls = w === "土" ? "wd-head sat" : (w === "日" ? "wd-head sun" : "wd-head");
+    const worked = wdWorked[i] > 0;
+    const bodyCls = worked ? "wd-body worked" : "wd-body off";
+    const bodyTxt = worked ? wdWorked[i] + "回" : "—";
+    grid += '<div class="wd-cell">' +
+            '<div class="' + headCls + '">' + w + '</div>' +
+            '<div class="' + bodyCls + '">' + bodyTxt + '</div>' +
+            '</div>';
+  });
+  grid += '</div>';
+
+  // --- 土日出勤手当: 土曜と日曜の両方に出勤した週末の該当出勤日数 ---
+  // 連続する (土, その翌日=日) の両方が出勤なら、その2日を該当日数としてカウント
+  let weekendAllowanceDays = 0;
+  let bothWeekends = 0;
+  Object.keys(satWorked).forEach(satDayStr => {
+    const satDay = parseInt(satDayStr, 10);
+    const sunDay = satDay + 1;  // 土曜の翌日は日曜
+    if (sunWorked[sunDay]) {
+      bothWeekends++;
+      weekendAllowanceDays += 2;  // 土・日の2日を該当日数に
+    }
+  });
+
+  const allowCls = weekendAllowanceDays > 0 ? "weekend-allowance" : "weekend-allowance zero";
+  const allowHtml =
+    '<span class="' + allowCls + '">' +
+    '<span class="extras-label">土日出勤手当 該当</span>' +
+    '<b>' + weekendAllowanceDays + '</b> 日' +
+    (bothWeekends > 0 ? '（' + bothWeekends + '週末）' : '') +
+    '</span>';
+
+  const extras = document.getElementById("indiv-extras");
+  if (extras) {
+    extras.innerHTML =
+      '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml;
+  }
+
+  // --- 託児利用バッジ (名前のすぐ右) ---
+  const careBadge = document.getElementById("indiv-care-badge");
+  if (careBadge) {
+    const monthHours = careMonthHours(year, month);
+    if (monthHours > 0 && typeof calcFee === "function") {
+      const fee = calcFee(monthHours);
+      careBadge.innerHTML =
+        '<span class="care-on">託児利用有' +
+        '<span class="care-fee">利用 ' + hoursToHHMM(monthHours) +
+        ' ／ 託児料金 ' + yen(fee.billed) +
+        (fee.capped ? '（上限¥35,000適用）' : '') + '</span></span>';
+    } else {
+      careBadge.innerHTML = "";
+    }
+  }
 }
 
 function renderTable(tableId, headers, rows, cellClassFn) {
