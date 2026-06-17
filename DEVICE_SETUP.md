@@ -60,6 +60,24 @@ cd "$env:USERPROFILE\tanpopo-sharoushi"; git add -A; if(git status --porcelain){
 
 ---
 
+## バックエンド (Apps Script) について
+
+`backend/apps_script.gs` が Apps Script (ジョブカン勤怠API) のコードです。
+- **どの端末からでも編集・同期できます** (このリポジトリに入っているため)。
+- ただし **ライブのApps Scriptへの反映だけは手動**です (GitHubからは自動反映されない)。
+- バックエンドを変更したとき(API追加・取得元変更など、稀)だけ、以下を実施:
+
+  1. `backend/apps_script.gs` の中身を全コピー
+     ```powershell
+     notepad "$env:USERPROFILE\tanpopo-sharoushi\backend\apps_script.gs"
+     ```
+  2. Apps Scriptエディタ (https://script.google.com/) を開き、コードを全置換して保存 (Ctrl+S)
+  3. 「デプロイ」→「デプロイを管理」→ ✏️ → バージョン「新しいバージョン」→「デプロイ」
+
+- 画面(index.html)の変更だけなら、この手順は不要 (C の公開pasteだけでOK)。
+
+---
+
 ## トラブル時
 
 | 症状 | 対処 |
