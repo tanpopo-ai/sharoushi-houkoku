@@ -1422,6 +1422,28 @@ function callApi(action, params) {
     });
 }
 
+// 託児/休暇データを Apps Script API 経由で取得して STATE に取り込む (CORS回避)
+function loadFormDataViaApi() {
+  return callApi("formdata").then(data => {
+    const sheets = (data && data.sheets) || [];
+    let ok = 0;
+    sheets.forEach(sh => {
+      const rows = sh.rows || [];
+      if (!rows.length) return;
+      // detectKind で care / leave のみ取り込む (それ以外は静かにスキップ)
+      const kind = (typeof detectKind === "function") ? detectKind(rows[0]) : null;
+      if (kind === "care") { STATE.care = rowsToCare(rows); ok++; }
+      else if (kind === "leave") { STATE.leave = rowsToLeave(rows); ok++; }
+    });
+    if (ok) {
+      STATE.loadedAt = new Date();
+      try { persist(); } catch (e) {}
+      try { refreshAll(); } catch (e) {}
+    }
+    return ok;
+  });
+}
+
 function secondsToHHMM(sec) {
   sec = Math.max(0, Math.round(Number(sec) || 0));
   const h = Math.floor(sec / 3600);
@@ -2062,14 +2084,11 @@ document.addEventListener("DOMContentLoaded", () => {
     try { loadSummary(); } catch (e) { console.warn("auto-load summary failed:", e); }
   }, 100);
 
-  // 2) 既存の託児/休暇データの直接取得を自動起動
-  //    (元々あった「スプレッドシートから直接取得を試す」ボタンを自動押下)
+  // 2) 託児/休暇データを Apps Script API 経由で自動取得 (CORS回避)
+  //    gviz直fetchはCORSで失敗するため、API経由を優先。失敗時のみ手動読み込み案内。
   setTimeout(() => {
-    const fetchBtn = document.getElementById("btn-fetch");
-    if (fetchBtn) {
-      try { fetchBtn.click(); } catch (e) { console.warn("auto-fetch failed:", e); }
-    }
-  }, 500);
+    loadFormDataViaApi().catch(e => console.warn("formdata API failed:", e));
+  }, 300);
 });
 
 </script>
