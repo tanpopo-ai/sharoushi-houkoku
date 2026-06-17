@@ -291,6 +291,22 @@
   color: #888;
 }
 .weekend-allowance b { color:#e65100; font-size: 15px; }
+
+/* 土日とも休み */
+.weekend-rest {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #e3f2fd;
+  border: 1px solid #64b5f6;
+}
+.weekend-rest.zero {
+  background: #f5f5f5;
+  border-color: #ddd;
+  color: #888;
+}
+.weekend-rest b { color:#1565c0; font-size: 15px; }
 .extras-label { font-size: 12px; color:#666; margin-right: 4px; }
 
 /* 休暇セル */
@@ -1810,8 +1826,8 @@ function renderIndivExtras(rows, year, month) {
   const idx = _indivColIdx;
   const WD = ["月", "火", "水", "木", "金", "土", "日"];
   const wdWorked = [0, 0, 0, 0, 0, 0, 0];  // 各曜日の出勤回数
-  const satWorked = {};  // 日 -> true (土曜出勤)
-  const sunWorked = {};  // 日 -> true (日曜出勤)
+  const satDays = {};  // 日 -> 出勤したか(boolean) ※出勤有無に関わらず全土曜を記録
+  const sunDays = {};  // 日 -> 出勤したか(boolean) ※全日曜を記録
 
   rows.forEach(r => {
     const dateStr = String(r[idx.date] || "");
@@ -1821,11 +1837,10 @@ function renderIndivExtras(rows, year, month) {
     const wd = dm[3];  // 曜日文字
     const loc = String(r[idx.loc] || "");
     const worked = (loc === "本院" || loc === "分院");
-    if (!worked) return;
     const wi = WD.indexOf(wd);
-    if (wi >= 0) wdWorked[wi]++;
-    if (wd === "土") satWorked[dd] = true;
-    if (wd === "日") sunWorked[dd] = true;
+    if (worked && wi >= 0) wdWorked[wi]++;  // 曜日グリッドは出勤回数のみ
+    if (wd === "土") satDays[dd] = worked;
+    if (wd === "日") sunDays[dd] = worked;
   });
 
   // --- 曜日グリッド HTML (曜日ごとに 見出し+出勤回数 の縦セル) ---
@@ -1842,16 +1857,21 @@ function renderIndivExtras(rows, year, month) {
   });
   grid += '</div>';
 
-  // --- 土日出勤評価加算日数 ---
-  // 基本ルール: 土日のどちらか1日は出勤。両方出勤した週末1回につき +1。
-  // 例: 土日両方出勤の週が1回→+1、2回→+2。
-  let bothWeekends = 0;
-  Object.keys(satWorked).forEach(satDayStr => {
-    const satDay = parseInt(satDayStr, 10);
-    const sunDay = satDay + 1;  // 土曜の翌日は日曜
-    if (sunWorked[sunDay]) {
-      bothWeekends++;
-    }
+  // --- 土日の週末評価 ---
+  // 基本ルール: 土日のどちらか1日は出勤。
+  //   両方出勤した週末1回 → 評価加算 +1
+  //   両方休みだった週末1回 → 土日とも休み +1
+  // 週末 = (土曜 d-1, 日曜 d) のペア。日曜を起点に同月内の土曜と対にする。
+  let bothWeekends = 0;     // 土日とも出勤
+  let neitherWeekends = 0;  // 土日とも休み
+  Object.keys(sunDays).forEach(sunStr => {
+    const sun = parseInt(sunStr, 10);
+    const sat = sun - 1;              // 日曜の前日は土曜
+    if (!(sat in satDays)) return;    // 同月内に対応する土曜がなければスキップ
+    const satW = satDays[sat];
+    const sunW = sunDays[sun];
+    if (satW && sunW) bothWeekends++;
+    else if (!satW && !sunW) neitherWeekends++;
   });
 
   const allowCls = bothWeekends > 0 ? "weekend-allowance" : "weekend-allowance zero";
@@ -1861,10 +1881,17 @@ function renderIndivExtras(rows, year, month) {
     '<b>' + bothWeekends + '</b> 日' +
     '</span>';
 
+  const restCls = neitherWeekends > 0 ? "weekend-rest" : "weekend-rest zero";
+  const restHtml =
+    '<span class="' + restCls + '">' +
+    '<span class="extras-label">土日とも休み</span>' +
+    '<b>' + neitherWeekends + '</b> 回' +
+    '</span>';
+
   const extras = document.getElementById("indiv-extras");
   if (extras) {
     extras.innerHTML =
-      '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml;
+      '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml + restHtml;
   }
 
   // --- 託児利用バッジ (名前のすぐ右) ---
