@@ -584,6 +584,8 @@
       <h2>特出時間 月別集計 (全スタッフ)</h2>
       <p class="muted"><span id="speca-loading">読み込み中...</span></p>
       <p class="muted">表示する月: <select id="speca-month"></select></p>
+      <!-- 特出時間 TOP5 -->
+      <div id="speca-top5" class="top5-box"></div>
       <div class="chart-box"><canvas id="chart-speca"></canvas></div>
       <div class="table-wrap"><table id="tbl-speca"></table></div>
     </div>
@@ -2036,35 +2038,30 @@ function loadSummary() {
 }
 
 function renderAggregations() {
-  renderTop5();
-  renderAggView("chart-ovta", "tbl-ovta", "残業時間", "monthlyOver", "ovta-month");
-  renderAggView("chart-speca", "tbl-speca", "特出時間", "monthlySpec", "speca-month");
+  renderAggView("chart-ovta", "tbl-ovta", "残業時間", "monthlyOver", "ovta-month", "ovta-top5");
+  renderAggView("chart-speca", "tbl-speca", "特出時間", "monthlySpec", "speca-month", "speca-top5");
 }
 
-// 残業時間 TOP5 (直近月の残業時間で降順)
-function renderTop5() {
-  const box = document.getElementById("ovta-top5");
+// TOP5 ランキング (指定月・指定指標で降順)
+function renderTop5(boxId, fieldKey, mi, ym, label) {
+  const box = document.getElementById(boxId);
   if (!box || !_summaryData) return;
-  const months = _summaryData.months || [];
   const staff = _summaryData.staff || [];
-  if (!months.length || !staff.length) { box.innerHTML = ""; return; }
-
-  const mi = months.length - 1;          // 直近月のインデックス
-  const ym = months[mi];
+  if (mi == null || mi < 0) { box.innerHTML = ""; return; }
 
   const ranked = staff
-    .map(s => ({ name: s.name, sec: (s.monthlyOver || [])[mi] || 0 }))
+    .map(s => ({ name: s.name, sec: (s[fieldKey] || [])[mi] || 0 }))
     .filter(x => x.sec > 0)
     .sort((a, b) => b.sec - a.sec)
     .slice(0, 5);
 
   if (!ranked.length) {
-    box.innerHTML = '<div class="top5-title">残業時間 TOP5 (' + escapeHtml(ym) +
-                    ')</div><div class="muted">残業時間の記録がありません。</div>';
+    box.innerHTML = '<div class="top5-title">' + escapeHtml(label) + ' TOP5 (' + escapeHtml(ym) +
+                    ')</div><div class="muted">' + escapeHtml(label) + 'の記録がありません。</div>';
     return;
   }
 
-  let html = '<div class="top5-title">残業時間 TOP5 (' + escapeHtml(ym) + ')</div>';
+  let html = '<div class="top5-title">' + escapeHtml(label) + ' TOP5 (' + escapeHtml(ym) + ')</div>';
   html += '<div class="top5-list">';
   ranked.forEach((x, i) => {
     const rank = i + 1;
@@ -2078,7 +2075,7 @@ function renderTop5() {
   box.innerHTML = html;
 }
 
-function renderAggView(chartId, tableId, title, fieldKey, monthSelId) {
+function renderAggView(chartId, tableId, title, fieldKey, monthSelId, top5Id) {
   if (!_summaryData) return;
   const months = _summaryData.months || [];
   const staff = _summaryData.staff || [];
@@ -2093,13 +2090,16 @@ function renderAggView(chartId, tableId, title, fieldKey, monthSelId) {
     }
     if (!sel._wired) {
       sel.addEventListener("change", () =>
-        renderAggView(chartId, tableId, title, fieldKey, monthSelId));
+        renderAggView(chartId, tableId, title, fieldKey, monthSelId, top5Id));
       sel._wired = true;
     }
   }
   let mi = sel ? parseInt(sel.value, 10) : (months.length - 1);
   if (isNaN(mi) || mi < 0 || mi >= months.length) mi = months.length - 1;
   const selYm = months[mi] || "";
+
+  // TOP5 ランキング (選択月)
+  if (top5Id) renderTop5(top5Id, fieldKey, mi, selYm, title);
 
   // チャート: 選択した月のみ (1系列・スタッフ別)
   const canvas = document.getElementById(chartId);
