@@ -124,6 +124,10 @@ function getSummary() {
   const monthly = {};
   // (staff, year-month) → { sat:{日:出勤bool}, sun:{日:出勤bool} } 土日出勤判定用
   const weekend = {};
+  // (staff, year-month) → { worked:[7], occ:[7] } 曜日別(月0..日6) 出勤回数/該当日数
+  const wdstat = {};
+  const WD_INDEX = { "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6 };
+  const _today = new Date(); _today.setHours(0, 0, 0, 0); // 本日(未到来日を分母から除外)
   for (const key of Object.keys(latest)) {
     const row = latest[key];
     const staff = String(row[idxStaff] || "").trim();
@@ -145,17 +149,33 @@ function getSummary() {
       monthly[staff][ym].over += sec;
     }
 
-    // 土日出勤判定: 日付 "05/03(土)" の曜日 + 出勤時刻>0
+    // 曜日 + 日 + 出勤判定
     const wm = dateStr.match(/\((.)\)/);
     const wd = wm ? wm[1] : "";
     const dm = dateStr.match(/\/(\d+)/);
     const day = dm ? parseInt(dm[1], 10) : 0;
+    const workedFlag = (idxIn >= 0) ? (parseTimeToSeconds(row[idxIn]) > 0) : false;
+
+    // 土日出勤判定 (土日両方出勤の週末数用)
     if ((wd === "土" || wd === "日") && day > 0 && idxIn >= 0) {
-      const worked = parseTimeToSeconds(row[idxIn]) > 0;
       if (!weekend[staff]) weekend[staff] = {};
       if (!weekend[staff][ym]) weekend[staff][ym] = { sat: {}, sun: {} };
-      if (wd === "土") weekend[staff][ym].sat[day] = worked;
-      else weekend[staff][ym].sun[day] = worked;
+      if (wd === "土") weekend[staff][ym].sat[day] = workedFlag;
+      else weekend[staff][ym].sun[day] = workedFlag;
+    }
+
+    // 曜日別 出勤率用 (未到来日は分母から除外)
+    const wi = WD_INDEX[wd];
+    if (wi != null && day > 0 && idxIn >= 0) {
+      const rowDate = new Date(year, month - 1, day);
+      if (rowDate <= _today) { // 到来済みのみ
+        if (!wdstat[staff]) wdstat[staff] = {};
+        if (!wdstat[staff][ym]) {
+          wdstat[staff][ym] = { worked: [0,0,0,0,0,0,0], occ: [0,0,0,0,0,0,0] };
+        }
+        wdstat[staff][ym].occ[wi]++;
+        if (workedFlag) wdstat[staff][ym].worked[wi]++;
+      }
     }
   }
 
@@ -190,6 +210,7 @@ function getSummary() {
     const cumulativeOver = [];
     const cumulativeSpec = [];
     const monthlyWeekendBoth = [];  // 各月の土日両方出勤の週末数
+    const monthlyWeekday = [];      // 各月の曜日別 {worked:[7], occ:[7]}
     months.forEach(ym => {
       const v = m[ym] || { over: 0, spec: 0 };
       monthlyOver.push(v.over);
@@ -199,8 +220,12 @@ function getSummary() {
       cumulativeOver.push(cumOver);
       cumulativeSpec.push(cumSpec);
       monthlyWeekendBoth.push(bothWorkedCount(name, ym));
+      const ws = (wdstat[name] && wdstat[name][ym]) ||
+                 { worked: [0,0,0,0,0,0,0], occ: [0,0,0,0,0,0,0] };
+      monthlyWeekday.push(ws);
     });
-    return { name, monthlyOver, monthlySpec, cumulativeOver, cumulativeSpec, monthlyWeekendBoth };
+    return { name, monthlyOver, monthlySpec, cumulativeOver, cumulativeSpec,
+             monthlyWeekendBoth, monthlyWeekday };
   });
 
   return {

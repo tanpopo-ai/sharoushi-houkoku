@@ -420,6 +420,7 @@
   <button data-view="overtime-agg">残業時間集計</button>
   <button data-view="special-agg">特出時間集計</button>
   <button data-view="weekend-agg">土日出勤集計</button>
+  <button data-view="weekday-pattern">曜日別出勤パターン</button>
 </nav>
 
 <main>
@@ -605,6 +606,27 @@
         ※ 各月の値は「その月に土日両方出勤した週末の回数」。本日以降の未到来分は含みません(自動取得済みの実績ベース)。
       </p>
       <div class="table-wrap"><table id="tbl-wka"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ ジョブカン: 曜日別出勤パターン ============ -->
+  <section class="view" id="view-weekday-pattern">
+    <div class="panel">
+      <h2>曜日別 出勤パターン (全スタッフ)</h2>
+      <p class="muted"><span id="wdp-loading">読み込み中...</span></p>
+      <p class="muted">
+        集計期間:
+        <select id="wdp-period">
+          <option value="1">直近1か月</option>
+          <option value="3" selected>直近3か月</option>
+          <option value="all">全期間</option>
+        </select>
+      </p>
+      <p class="muted" style="color:#888">
+        各セル = その曜日の<b>出勤率</b>(出勤した回数 ÷ その曜日の到来日数)。色が濃いほど定常的な勤務曜日。
+        薄い色は特出など一時的な出勤。※有給取得日は「出勤なし」となるため率が下がります(将来、有給・交代データで補正予定)。
+      </p>
+      <div class="table-wrap"><table id="tbl-wdp"></table></div>
     </div>
   </section>
 
@@ -2037,7 +2059,7 @@ function loadSummary() {
     renderAggregations();
     return;
   }
-  ["ovta-loading", "speca-loading", "wka-loading"].forEach(id => {
+  ["ovta-loading", "speca-loading", "wka-loading", "wdp-loading"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = "読み込み中...";
   });
@@ -2045,14 +2067,14 @@ function loadSummary() {
   callApi("summary")
     .then(data => {
       _summaryData = data;
-      ["ovta-loading", "speca-loading", "wka-loading"].forEach(id => {
+      ["ovta-loading", "speca-loading", "wka-loading", "wdp-loading"].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = "";
       });
       renderAggregations();
     })
     .catch(err => {
-      ["ovta-loading", "speca-loading", "wka-loading"].forEach(id => {
+      ["ovta-loading", "speca-loading", "wka-loading", "wdp-loading"].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = "エラー: " + err.message;
       });
@@ -2064,6 +2086,63 @@ function renderAggregations() {
   renderAggView("chart-ovta", "tbl-ovta", "残業時間", "monthlyOver", "ovta-month", "ovta-top5");
   renderAggView("chart-speca", "tbl-speca", "特出時間", "monthlySpec", "speca-month", "speca-top5");
   renderWeekendAgg();
+  renderWeekdayPattern();
+}
+
+// 曜日別出勤パターン: 全スタッフ×曜日の出勤率を色濃淡で表示 (期間選択可)
+function renderWeekdayPattern() {
+  if (!_summaryData) return;
+  const months = _summaryData.months || [];
+  const staff = _summaryData.staff || [];
+  const sel = document.getElementById("wdp-period");
+  const tbl = document.getElementById("tbl-wdp");
+  if (!months.length || !staff.length) { if (tbl) tbl.innerHTML = ""; return; }
+
+  if (sel && !sel._wired) { sel.addEventListener("change", renderWeekdayPattern); sel._wired = true; }
+
+  // 集計対象の月インデックス
+  const period = sel ? sel.value : "3";
+  let startIdx = 0;
+  if (period !== "all") {
+    const n = parseInt(period, 10) || 1;
+    startIdx = Math.max(0, months.length - n);
+  }
+  const idxs = [];
+  for (let i = startIdx; i < months.length; i++) idxs.push(i);
+
+  const WD = ["月", "火", "水", "木", "金", "土", "日"];
+  let html = "<thead><tr><th>スタッフ</th>";
+  WD.forEach((w, i) => {
+    const c = i === 5 ? "wd-head sat" : (i === 6 ? "wd-head sun" : "");
+    html += "<th class='" + c + "'>" + w + "</th>";
+  });
+  html += "</tr></thead><tbody>";
+
+  staff.forEach(s => {
+    const worked = [0, 0, 0, 0, 0, 0, 0];
+    const occ = [0, 0, 0, 0, 0, 0, 0];
+    idxs.forEach(mi => {
+      const ws = (s.monthlyWeekday || [])[mi];
+      if (ws && ws.worked && ws.occ) {
+        for (let k = 0; k < 7; k++) { worked[k] += (ws.worked[k] || 0); occ[k] += (ws.occ[k] || 0); }
+      }
+    });
+    html += "<tr><td>" + escapeHtml(s.name) + "</td>";
+    for (let k = 0; k < 7; k++) {
+      if (occ[k] === 0) {
+        html += "<td class='num' style='color:#ccc'>‐</td>";
+      } else {
+        const rate = worked[k] / occ[k];
+        const pct = Math.round(rate * 100);
+        const a = (rate * 0.85).toFixed(2);
+        const fg = rate >= 0.5 ? "color:#fff;" : "";
+        html += "<td class='num' style='background:rgba(46,125,50," + a + ");" + fg + "'>" + pct + "%</td>";
+      }
+    }
+    html += "</tr>";
+  });
+  html += "</tbody>";
+  if (tbl) tbl.innerHTML = html;
 }
 
 // 土日出勤 6か月集計 (賞与査定用): 開始月から6か月の「土日両方出勤の週末数」をスタッフ別に合計
@@ -2242,6 +2321,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const wkaBtn = document.querySelector('#tabs button[data-view="weekend-agg"]');
   if (wkaBtn) wkaBtn.addEventListener("click", loadSummary);
+
+  const wdpBtn = document.querySelector('#tabs button[data-view="weekday-pattern"]');
+  if (wdpBtn) wdpBtn.addEventListener("click", loadSummary);
 
   // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 
