@@ -570,6 +570,7 @@
     <div class="panel">
       <h2>残業時間 月別集計 (全スタッフ)</h2>
       <p class="muted"><span id="ovta-loading">読み込み中...</span></p>
+      <p class="muted">表示する月: <select id="ovta-month"></select></p>
       <!-- 残業時間 TOP5 -->
       <div id="ovta-top5" class="top5-box"></div>
       <div class="chart-box"><canvas id="chart-ovta"></canvas></div>
@@ -582,6 +583,7 @@
     <div class="panel">
       <h2>特出時間 月別集計 (全スタッフ)</h2>
       <p class="muted"><span id="speca-loading">読み込み中...</span></p>
+      <p class="muted">表示する月: <select id="speca-month"></select></p>
       <div class="chart-box"><canvas id="chart-speca"></canvas></div>
       <div class="table-wrap"><table id="tbl-speca"></table></div>
     </div>
@@ -2035,8 +2037,8 @@ function loadSummary() {
 
 function renderAggregations() {
   renderTop5();
-  renderAggView("chart-ovta", "tbl-ovta", "残業時間 月別合計", "monthlyOver");
-  renderAggView("chart-speca", "tbl-speca", "特出時間 月別合計", "monthlySpec");
+  renderAggView("chart-ovta", "tbl-ovta", "残業時間", "monthlyOver", "ovta-month");
+  renderAggView("chart-speca", "tbl-speca", "特出時間", "monthlySpec", "speca-month");
 }
 
 // 残業時間 TOP5 (直近月の残業時間で降順)
@@ -2076,36 +2078,50 @@ function renderTop5() {
   box.innerHTML = html;
 }
 
-function renderAggView(chartId, tableId, title, fieldKey) {
+function renderAggView(chartId, tableId, title, fieldKey, monthSelId) {
   if (!_summaryData) return;
   const months = _summaryData.months || [];
   const staff = _summaryData.staff || [];
 
-  // チャート
+  // 月セレクタを準備 (初回のみ options 生成、既定は直近月)
+  const sel = monthSelId ? document.getElementById(monthSelId) : null;
+  if (sel) {
+    if (sel.options.length !== months.length) {
+      sel.innerHTML = months.map((ym, i) =>
+        '<option value="' + i + '">' + escapeHtml(ym) + '</option>').join('');
+      sel.value = String(Math.max(0, months.length - 1)); // 既定=直近月
+    }
+    if (!sel._wired) {
+      sel.addEventListener("change", () =>
+        renderAggView(chartId, tableId, title, fieldKey, monthSelId));
+      sel._wired = true;
+    }
+  }
+  let mi = sel ? parseInt(sel.value, 10) : (months.length - 1);
+  if (isNaN(mi) || mi < 0 || mi >= months.length) mi = months.length - 1;
+  const selYm = months[mi] || "";
+
+  // チャート: 選択した月のみ (1系列・スタッフ別)
   const canvas = document.getElementById(chartId);
   if (canvas && window.Chart) {
     if (_aggCharts[chartId]) _aggCharts[chartId].destroy();
-    const colors = [
-      "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
-      "#edc949", "#af7aa1", "#ff9da7", "#9c755f", "#bab0ab",
-    ];
-    const datasets = months.map((ym, mi) => ({
-      label: ym,
+    const dataset = {
+      label: selYm,
       data: staff.map(s => ((s[fieldKey] || [])[mi] || 0) / 3600),
-      backgroundColor: colors[mi % colors.length],
-    }));
+      backgroundColor: "#4e79a7",
+    };
     _aggCharts[chartId] = new Chart(canvas.getContext("2d"), {
       type: "bar",
-      data: { labels: staff.map(s => s.name), datasets },
+      data: { labels: staff.map(s => s.name), datasets: [dataset] },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          title: { display: true, text: title, font: { size: 14 } },
-          legend: { position: "bottom" },
+          title: { display: true, text: title + " (" + selYm + ")", font: { size: 14 } },
+          legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ctx.dataset.label + ": " + secondsToHHMM(ctx.parsed.y * 3600)
+              label: ctx => secondsToHHMM(ctx.parsed.y * 3600)
             }
           }
         },
@@ -2117,7 +2133,7 @@ function renderAggView(chartId, tableId, title, fieldKey) {
     });
   }
 
-  // 一覧表
+  // 一覧表 (全月 + 合計。参照用に残す)
   const tbl = document.getElementById(tableId);
   if (tbl) {
     let html = "<thead><tr><th>スタッフ</th>";
