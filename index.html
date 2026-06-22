@@ -493,6 +493,12 @@
   <!-- ============ サマリー ============ -->
   <section class="view active" id="view-dashboard">
     <div class="panel">
+      <h2>残業・特出 月別合計（医院全体）</h2>
+      <p class="muted" style="margin-top:-4px">※ 個人名は表示しません。医院全体の合計です。藤門翔平（管理職・固定給）は集計から除外しています。特出＝1日3時間以上の残業。</p>
+      <div class="table-wrap"><table id="tbl-clinic-ot"></table></div>
+      <p class="muted" id="clinic-ot-note"></p>
+    </div>
+    <div class="panel">
       <h2>月次サマリー</h2>
       <div class="kpis" id="kpis"></div>
       <p class="muted" id="dash-note" style="margin-bottom:0"></p>
@@ -2082,7 +2088,20 @@ function loadSummary() {
     });
 }
 
+function renderClinicOvertime() {
+  const tbl = document.getElementById("tbl-clinic-ot");
+  if (!tbl || !_summaryData) { if (tbl) tbl.innerHTML = ""; return; }
+  const months = _summaryData.months || [], staff = _summaryData.staff || [];
+  const inc = staff.filter(s => !/藤門\s*翔平/.test(s.name || ""));
+  let to = 0, ts = 0, h = "<thead><tr><th>月</th><th>残業 合計</th><th>特出 合計</th></tr></thead><tbody>";
+  months.forEach((ym, mi) => { let o = 0, sp = 0; inc.forEach(s => { o += (s.monthlyOver||[])[mi]||0; sp += (s.monthlySpec||[])[mi]||0; }); to += o; ts += sp;
+    h += "<tr><td>" + escapeHtml(ym) + "</td><td class='num'>" + secondsToHHMM(o) + "</td><td class='num'>" + secondsToHHMM(sp) + "</td></tr>"; });
+  h += "</tbody><tfoot><tr><td><b>累計</b></td><td class='num'><b>" + secondsToHHMM(to) + "</b></td><td class='num'><b>" + secondsToHHMM(ts) + "</b></td></tr></tfoot>";
+  tbl.innerHTML = h;
+  const n = document.getElementById("clinic-ot-note"); if (n) n.textContent = "対象スタッフ " + inc.length + "名（藤門翔平を除く）";
+}
 function renderAggregations() {
+  renderClinicOvertime();
   renderAggView("chart-ovta", "tbl-ovta", "残業時間", "monthlyOver", "ovta-month", "ovta-top5");
   renderAggView("chart-speca", "tbl-speca", "特出時間", "monthlySpec", "speca-month", "speca-top5");
   renderWeekendAgg();
