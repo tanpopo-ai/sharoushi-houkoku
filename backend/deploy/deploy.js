@@ -20,7 +20,8 @@ const os = require("os");
 const path = require("path");
 const { google } = require("googleapis");
 
-const SCRIPT_ID = "1yFcaytRTN4m70RKBs7Ogy5UvO-jfljsObVNcTHIHe97ILA2GI2-kmBGb";
+// スクリプトIDは名前からDriveで自動取得する (ハードコードの転記ミスを防ぐ)
+const SCRIPT_NAME = "ジョブカン勤怠API";
 const CODE_FILE = path.join(__dirname, "..", "apps_script.gs"); // backend/apps_script.gs
 const CLASP_RC = path.join(os.homedir(), ".clasprc.json");
 
@@ -42,9 +43,24 @@ function loadAuth() {
   return oauth2;
 }
 
+async function resolveScriptId(auth) {
+  const drive = google.drive({ version: "v3", auth });
+  const fl = await drive.files.list({
+    q: "mimeType='application/vnd.google-apps.script' and trashed=false and name='" + SCRIPT_NAME + "'",
+    fields: "files(id,name,shortcutDetails)",
+    pageSize: 5,
+  });
+  const files = fl.data.files || [];
+  if (!files.length) throw new Error("Scriptプロジェクト '" + SCRIPT_NAME + "' が見つかりません");
+  const f = files[0];
+  return (f.shortcutDetails && f.shortcutDetails.targetId) || f.id;
+}
+
 async function main() {
   const auth = loadAuth();
   const script = google.script({ version: "v1", auth });
+  const SCRIPT_ID = await resolveScriptId(auth);
+  console.log("対象スクリプトID: " + SCRIPT_ID);
 
   // 1) 現在の内容を取得 (マニフェスト等を保持するため)
   const cur = await script.projects.getContent({ scriptId: SCRIPT_ID });
