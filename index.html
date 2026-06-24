@@ -378,6 +378,46 @@
   display: none;
 }
 
+/* ===== 常勤シフト表 (ガントチャート) ===== */
+.shift-weekday-tabs { display:flex; gap:4px; margin:8px 0; flex-wrap:wrap; }
+.shift-weekday-tabs button {
+  border:1px solid #ccc; background:#f5f5f5; padding:4px 14px;
+  cursor:pointer; font-size:13px; border-radius:4px; min-width:40px;
+}
+.shift-weekday-tabs button.active { background:#2563eb; color:#fff; border-color:#2563eb; font-weight:bold; }
+.shift-weekday-tabs button.sat { color:#1565c0; }
+.shift-weekday-tabs button.sun { color:#c62828; }
+.shift-weekday-tabs button.sat.active, .shift-weekday-tabs button.sun.active { color:#fff; }
+
+.shift-chart { margin-top:10px; font-size:12px; }
+.shift-row { display:flex; align-items:stretch; border-top:1px solid #eee; }
+.shift-row:last-child { border-bottom:1px solid #eee; }
+.shift-row.head { border-top:none; font-weight:bold; color:#555; }
+.shift-name {
+  flex:0 0 130px; width:130px; padding:6px 8px; box-sizing:border-box;
+  display:flex; align-items:center; border-right:1px solid #ddd; background:#fafafa;
+}
+.shift-track { position:relative; flex:1 1 auto; min-height:30px; }
+/* 1時間ごとの目盛り線 (背景) */
+.shift-track.grid { background-image: repeating-linear-gradient(
+  to right, #eee 0, #eee 1px, transparent 1px, transparent var(--hour-w)); }
+.shift-axis { position:relative; height:20px; }
+.shift-axis .tick {
+  position:absolute; top:0; transform:translateX(-50%);
+  font-size:10px; color:#888; white-space:nowrap;
+}
+.shift-bar {
+  position:absolute; top:5px; bottom:5px; border-radius:4px;
+  background:linear-gradient(180deg,#42a5f5,#1e88e5); color:#fff;
+  font-size:10px; line-height:1; display:flex; align-items:center; justify-content:center;
+  white-space:nowrap; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.15);
+}
+.shift-bar.bunin { background:linear-gradient(180deg,#66bb6a,#43a047); }
+.shift-empty { padding:6px 8px; color:#bbb; font-style:italic; }
+.ft-table td.num, .ft-table th.num { text-align:right; }
+.ft-yes { color:#1e88e5; font-weight:bold; }
+.ft-no  { color:#bbb; }
+
 /* ヘッダリンク */
 .header-links {
   margin-top: 8px;
@@ -421,6 +461,7 @@
   <button data-view="special-agg">特出時間集計</button>
   <button data-view="weekend-agg">土日出勤集計</button>
   <button data-view="weekday-pattern">曜日別出勤パターン</button>
+  <button data-view="shift">常勤シフト表</button>
 </nav>
 
 <main>
@@ -633,6 +674,37 @@
         薄い色は特出など一時的な出勤。※有給取得日は「出勤なし」となるため率が下がります(将来、有給・交代データで補正予定)。
       </p>
       <div class="table-wrap"><table id="tbl-wdp"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ ジョブカン: 常勤シフト表 ============ -->
+  <section class="view" id="view-shift">
+    <div class="panel">
+      <h2>常勤スタッフ 曜日別シフト表</h2>
+      <p class="muted"><span id="shift-loading">読み込み中...</span></p>
+      <p class="muted">
+        集計期間:
+        <select id="shift-period">
+          <option value="1">直近1か月</option>
+          <option value="3" selected>直近3か月</option>
+          <option value="all">全期間</option>
+        </select>
+      </p>
+      <p class="muted" style="color:#888">
+        <b>常勤</b> = 上記期間の<b>実労働時間が週平均35時間以上</b>のスタッフ。
+        各バーは、その曜日に出勤した日の<b>出勤・退勤時刻の中央値</b>(代表的なシフト)。
+        出勤率50%以上の曜日のみ表示します(<span style="color:#1e88e5">■</span>本院 /
+        <span style="color:#43a047">■</span>分院)。
+      </p>
+      <!-- 曜日タブ -->
+      <nav id="shift-weekday-tabs" class="shift-weekday-tabs"></nav>
+      <!-- ガントチャート -->
+      <div id="shift-chart"></div>
+      <!-- 常勤判定の根拠 (週平均勤務時間) -->
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer;color:#555">常勤判定の根拠(全スタッフの週平均勤務時間)</summary>
+        <div class="table-wrap" style="margin-top:8px"><table id="tbl-shift-ft" class="ft-table"></table></div>
+      </details>
     </div>
   </section>
 
@@ -2324,6 +2396,268 @@ function renderAggView(chartId, tableId, title, fieldKey, monthSelId, top5Id) {
 
 
 /* ============================================================
+ * 常勤シフト表 (曜日別・時間軸ガントチャート)
+ *   常勤 = 選択期間の実労働時間が週平均35時間以上のスタッフ
+ *   各バー = その曜日に出勤した日の 出勤/退勤時刻の中央値 (代表シフト)
+ * ============================================================ */
+const SHIFT_WD = ["月", "火", "水", "木", "金", "土", "日"];
+const FULLTIME_WEEKLY_HOURS = 35;   // 常勤の閾値 (週平均時間)
+const SHIFT_WD_MIN_RATE = 0.5;      // この曜日の出勤率がこれ以上なら「定常勤務日」として表示
+
+let _shiftLoaded = false;
+let _shiftDetails = null;     // [{name, header, rows}]
+let _shiftStaffData = null;   // 算出結果 [{name, dispName, weeklyHours, nWeeks, fulltime, byWeekday:[...]}]
+let _shiftCurrentWd = null;   // 表示中の曜日 (0=月..6=日)
+
+function _shiftMedian(arr) {
+  if (!arr || !arr.length) return null;
+  const a = arr.slice().sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+function loadShift() {
+  if (_shiftLoaded) { computeShift(); renderShift(); return; }
+  const loading = document.getElementById("shift-loading");
+  if (loading) loading.textContent = "スタッフ別データ読み込み中...";
+
+  callApi("staff_list")
+    .then(data => {
+      const names = data.staff || [];
+      if (!names.length) throw new Error("スタッフ一覧が取得できませんでした");
+      return Promise.all(names.map(n =>
+        callApi("staff_detail", { name: n })
+          .then(d => ({ name: n, header: d.header || [], rows: d.rows || [] }))
+          .catch(() => null)
+      ));
+    })
+    .then(details => {
+      _shiftDetails = details.filter(Boolean);
+      _shiftLoaded = true;
+      if (loading) loading.textContent = "";
+      const sel = document.getElementById("shift-period");
+      if (sel && !sel._wired) {
+        sel.addEventListener("change", () => { computeShift(); renderShift(); });
+        sel._wired = true;
+      }
+      computeShift();
+      renderShift();
+    })
+    .catch(err => {
+      if (loading) loading.textContent = "エラー: " + err.message;
+      _shiftLoaded = false;
+    });
+}
+
+// _shiftDetails → _shiftStaffData を算出 (期間セレクタの値で再計算)
+function computeShift() {
+  if (!_shiftDetails) return;
+  const period = (document.getElementById("shift-period") || {}).value || "3";
+
+  // 各スタッフの日次レコードを解析
+  const parsed = _shiftDetails.map(s => {
+    const idx = {
+      acq:  findColumn(s.header, h => h.indexOf("取得日時") >= 0),
+      date: findColumn(s.header, h => h.indexOf("日付") >= 0),
+      in:   findColumn(s.header, h => h.indexOf("出勤") >= 0 && h.indexOf("時刻") >= 0),
+      out:  findColumn(s.header, h => h.indexOf("退勤") >= 0 && h.indexOf("時刻") >= 0),
+      work: findColumn(s.header, h => h.indexOf("実労働") >= 0),
+      loc:  findColumn(s.header, h => h.indexOf("判定勤務地") >= 0),
+    };
+    const days = [];
+    s.rows.forEach(r => {
+      const dateStr = String(r[idx.date] || "");
+      if (dateStr.indexOf("合計") >= 0) return;
+      const dm = dateStr.match(/(\d+)\/(\d+)\((.)\)/);  // "06/01(月)"
+      if (!dm) return;
+      const mm = parseInt(dm[1], 10), dd = parseInt(dm[2], 10);
+      const wi = SHIFT_WD.indexOf(dm[3]);
+      if (wi < 0) return;
+      const acq = String(r[idx.acq] || "");
+      const yr = parseInt(acq.substring(0, 4), 10) || (new Date()).getFullYear();
+      const date = new Date(yr, mm - 1, dd);
+      const loc = String(r[idx.loc] || "");
+      const worked = (loc === "本院" || loc === "分院");
+      const start = idx.in  >= 0 ? parseTime(r[idx.in])  : null;
+      const end   = idx.out >= 0 ? parseTime(r[idx.out]) : null;
+      const work  = idx.work >= 0 ? parseTime(r[idx.work]) : null;
+      days.push({ date, wi, loc, worked, start, end, work });
+    });
+    return { name: s.name, days };
+  });
+
+  // 期間の起点: データ内の最新日付から N か月前 (全期間なら制限なし)
+  let maxT = 0;
+  parsed.forEach(p => p.days.forEach(d => { if (d.date.getTime() > maxT) maxT = d.date.getTime(); }));
+  let cutoff = -Infinity;
+  if (period !== "all" && maxT) {
+    const c = new Date(maxT);
+    c.setMonth(c.getMonth() - (parseInt(period, 10) || 1));
+    cutoff = c.getTime();
+  }
+
+  _shiftStaffData = parsed.map(p => {
+    const inP = p.days.filter(d => d.date.getTime() >= cutoff);
+
+    // 週(月曜始まり)ごとに実労働時間を合計し、その「中央値」を週あたり勤務時間とする。
+    //  ・週境界はエポック日に+3して月曜始まりに揃える (1970/1/1=木のため)
+    //  ・中央値にすることで、期間端の部分週や休暇週に左右されず「通常週」の勤務時間を捉える
+    const weekSum = {};
+    inP.forEach(d => {
+      if (d.worked && d.work != null) {
+        const wk = Math.floor((Math.floor(d.date.getTime() / 86400000) + 3) / 7);
+        weekSum[wk] = (weekSum[wk] || 0) + d.work;
+      }
+    });
+    const weekTotals = Object.values(weekSum);
+    const nWeeks = weekTotals.length;
+    const weeklyHours = nWeeks ? _shiftMedian(weekTotals) : 0;
+
+    // 曜日別の代表シフト (中央値) — 出勤率50%以上の曜日のみ
+    const byWeekday = [];
+    for (let wi = 0; wi < 7; wi++) {
+      const dayRows = inP.filter(d => d.wi === wi);
+      const occ = dayRows.length;
+      const w = dayRows.filter(d => d.worked && d.start != null && d.end != null && d.end > d.start);
+      if (occ > 0 && w.length > 0 && (w.length / occ) >= SHIFT_WD_MIN_RATE) {
+        const cnt = {};
+        w.forEach(d => { cnt[d.loc] = (cnt[d.loc] || 0) + 1; });
+        const loc = (cnt["分院"] || 0) > (cnt["本院"] || 0) ? "分院" : "本院";
+        byWeekday.push({
+          start: _shiftMedian(w.map(d => d.start)),
+          end:   _shiftMedian(w.map(d => d.end)),
+          occ, worked: w.length, loc,
+        });
+      } else {
+        byWeekday.push(null);
+      }
+    }
+
+    return {
+      name: p.name,
+      dispName: String(p.name).replace(/\s*[\(（].*$/, "").trim(),
+      weeklyHours, nWeeks,
+      fulltime: weeklyHours >= FULLTIME_WEEKLY_HOURS,
+      byWeekday,
+    };
+  }).sort((a, b) => b.weeklyHours - a.weeklyHours || a.dispName.localeCompare(b.dispName, "ja"));
+
+  // 既定の曜日 = 常勤スタッフが最も多く出勤する曜日 (なければ今日の曜日)
+  if (_shiftCurrentWd == null) {
+    const counts = [0, 0, 0, 0, 0, 0, 0];
+    _shiftStaffData.forEach(s => {
+      if (s.fulltime) s.byWeekday.forEach((b, i) => { if (b) counts[i]++; });
+    });
+    let best = -1, bestN = -1;
+    counts.forEach((n, i) => { if (n > bestN) { bestN = n; best = i; } });
+    if (bestN > 0) {
+      _shiftCurrentWd = best;
+    } else {
+      const js = (new Date()).getDay(); // 0=日..6=土
+      _shiftCurrentWd = (js === 0) ? 6 : js - 1;
+    }
+  }
+}
+
+function renderShiftWeekdayTabs() {
+  const nav = document.getElementById("shift-weekday-tabs");
+  if (!nav) return;
+  let html = "";
+  SHIFT_WD.forEach((w, i) => {
+    const cls = [i === _shiftCurrentWd ? "active" : "", i === 5 ? "sat" : (i === 6 ? "sun" : "")]
+      .filter(Boolean).join(" ");
+    html += '<button type="button" class="' + cls + '" data-wd="' + i + '">' + w + '</button>';
+  });
+  nav.innerHTML = html;
+  nav.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _shiftCurrentWd = parseInt(btn.dataset.wd, 10);
+      renderShiftWeekdayTabs();
+      renderShiftChart();
+    });
+  });
+}
+
+function renderShiftChart() {
+  const box = document.getElementById("shift-chart");
+  if (!box || !_shiftStaffData) return;
+  const wi = _shiftCurrentWd;
+  const ft = _shiftStaffData.filter(s => s.fulltime);
+
+  if (!ft.length) {
+    box.innerHTML = '<p class="shift-empty">週平均35時間以上の常勤スタッフが見つかりませんでした(期間を変更してお試しください)。</p>';
+    return;
+  }
+
+  // 時間軸: 全曜日・全常勤スタッフのシフトから最小開始〜最大終了を求め、全曜日で共通の軸にする
+  let lo = Infinity, hi = -Infinity;
+  ft.forEach(s => s.byWeekday.forEach(b => {
+    if (b) { if (b.start < lo) lo = b.start; if (b.end > hi) hi = b.end; }
+  }));
+  if (!isFinite(lo) || !isFinite(hi)) { lo = 8; hi = 20; }
+  lo = Math.floor(lo); hi = Math.ceil(hi);
+  if (hi - lo < 1) hi = lo + 1;
+  const span = hi - lo;
+  const pct = h => ((h - lo) / span) * 100;
+  const hourW = (100 / span).toFixed(4) + "%";
+
+  // 時間目盛り (ヘッダ)
+  let axis = '<div class="shift-row head"><div class="shift-name">スタッフ</div>' +
+             '<div class="shift-axis" style="flex:1 1 auto;position:relative">';
+  for (let h = lo; h <= hi; h++) {
+    axis += '<span class="tick" style="left:' + pct(h) + '%">' + h + ':00</span>';
+  }
+  axis += '</div></div>';
+
+  // スタッフ行
+  let rows = "";
+  ft.forEach(s => {
+    const b = s.byWeekday[wi];
+    let track;
+    if (b) {
+      const left = pct(b.start), width = pct(b.end) - pct(b.start);
+      const cls = b.loc === "分院" ? "shift-bar bunin" : "shift-bar";
+      const label = hoursToHHMM(b.start) + "–" + hoursToHHMM(b.end);
+      const title = s.dispName + " / " + SHIFT_WD[wi] + "曜 " + label +
+                    " (" + b.loc + "・出勤率" + Math.round(b.worked / b.occ * 100) + "% " +
+                    b.worked + "/" + b.occ + "日)";
+      track = '<div class="shift-track grid" style="--hour-w:' + hourW + '">' +
+              '<div class="' + cls + '" style="left:' + left + '%;width:' + width + '%" title="' +
+              escapeHtml(title) + '">' + escapeHtml(label) + '</div></div>';
+    } else {
+      track = '<div class="shift-track grid" style="--hour-w:' + hourW + '">' +
+              '<div class="shift-empty" style="position:absolute;left:8px;top:6px">― 休み ―</div></div>';
+    }
+    rows += '<div class="shift-row"><div class="shift-name">' + escapeHtml(s.dispName) + '</div>' + track + '</div>';
+  });
+
+  box.innerHTML = '<div class="shift-chart">' + axis + rows + '</div>';
+}
+
+function renderShiftFulltimeTable() {
+  const tbl = document.getElementById("tbl-shift-ft");
+  if (!tbl || !_shiftStaffData) return;
+  let html = "<thead><tr><th>スタッフ</th><th class='num'>週平均勤務時間</th>" +
+             "<th class='num'>集計週数</th><th>常勤判定</th></tr></thead><tbody>";
+  _shiftStaffData.forEach(s => {
+    html += "<tr><td>" + escapeHtml(s.dispName) + "</td>" +
+            "<td class='num'>" + s.weeklyHours.toFixed(1) + " h</td>" +
+            "<td class='num'>" + s.nWeeks + "</td>" +
+            "<td class='" + (s.fulltime ? "ft-yes" : "ft-no") + "'>" +
+            (s.fulltime ? "常勤 (35h以上)" : "対象外") + "</td></tr>";
+  });
+  html += "</tbody>";
+  tbl.innerHTML = html;
+}
+
+function renderShift() {
+  renderShiftWeekdayTabs();
+  renderShiftChart();
+  renderShiftFulltimeTable();
+}
+
+
+/* ============================================================
  * イベント結合
  * ============================================================ */
 
@@ -2343,6 +2677,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const wdpBtn = document.querySelector('#tabs button[data-view="weekday-pattern"]');
   if (wdpBtn) wdpBtn.addEventListener("click", loadSummary);
+
+  const shiftBtn = document.querySelector('#tabs button[data-view="shift"]');
+  if (shiftBtn) shiftBtn.addEventListener("click", loadShift);
 
   // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 
