@@ -691,7 +691,7 @@
         </select>
       </p>
       <p class="muted" style="color:#888">
-        <b>常勤</b> = 上記期間の<b>実労働時間が週平均35時間以上</b>のスタッフ。
+        <b>常勤</b> = 上記期間の<b>実労働時間が週平均35時間以上</b>のスタッフ(藤門翔平は除く)。
         各バーは、その曜日に出勤した日の<b>出勤・退勤時刻の中央値</b>(代表的なシフト)。
         出勤率50%以上の曜日のみ表示します(<span style="color:#1e88e5">■</span>本院 /
         <span style="color:#43a047">■</span>分院)。
@@ -2454,8 +2454,11 @@ function computeShift() {
   if (!_shiftDetails) return;
   const period = (document.getElementById("shift-period") || {}).value || "3";
 
+  // 藤門翔平 (管理職・固定給) は他タブ同様このタブからも除外
+  const targets = _shiftDetails.filter(s => !/藤門\s*翔平/.test(s.name || ""));
+
   // 各スタッフの日次レコードを解析
-  const parsed = _shiftDetails.map(s => {
+  const parsed = targets.map(s => {
     const idx = {
       acq:  findColumn(s.header, h => h.indexOf("取得日時") >= 0),
       date: findColumn(s.header, h => h.indexOf("日付") >= 0),
