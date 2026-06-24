@@ -66,10 +66,12 @@ cd "$env:USERPROFILE\tanpopo-sharoushi"; git add -A; if(git status --porcelain){
 3. チャットで「○○を変更して」と日本語で依頼する
    - 例:「個人別タブに△△の列を追加して」「トップの集計から□□を除外して」
 4. Claude が編集し、`claude/...` という**作業ブランチに自動で commit & push** します
-5. **ライブサイトに公開するには `main` への取り込みが必要**です。次のいずれか:
-   - Claude に「**プルリクエストを作って**」と頼む → 作られた PR を GitHub 上で **Merge**
-   - または GitHub の画面で該当ブランチから main へ PR を作成し Merge
-6. main にマージされると 1〜2分後にライブサイトへ自動反映(ブラウザは Ctrl+Shift+R)
+5. **ライブサイトに公開する**(= `main` へ反映)。おすすめは Node デプロイ:
+   - Claude に「**公開して**」と頼む → Claude が **`node deploy.js`** を実行し、
+     変更を `main` へ push → GitHub Pages が自動で再ビルド(下記「E. Nodeで一発公開」参照)
+   - ※ PR でレビューしてから公開したい場合は、代わりに「**PRを作って**」と頼み、
+     GitHub 上で **Merge** してもOK(従来どおり)
+6. 1〜2分後にライブサイトへ自動反映(ブラウザは Ctrl+Shift+R)
 
 ### ローカル(A〜C)との違い
 
@@ -88,6 +90,35 @@ cd "$env:USERPROFILE\tanpopo-sharoushi"; git add -A; if(git status --porcelain){
 
 ---
 
+## E. Node で一発公開 (`node deploy.js`) — どの環境でも共通
+
+PowerShell の C と同じ「公開」を、**Node から1コマンド**で実行できます。
+Windows / Mac / Claude Code on the web のどこでも同じコマンドで動きます
+(git を呼ぶだけなので `npm install` 不要)。
+
+```bash
+# リポジトリのルートで:
+node deploy.js
+# または
+npm run deploy
+
+# コミットメッセージを指定したいとき:
+node deploy.js "個人別タブに○○列を追加"
+```
+
+`node deploy.js` がやること:
+
+1. 未コミットの変更があれば自動で commit(メッセージは引数 or `update 日時`)
+2. `origin/main` を取り込み(他デバイス/Claude の変更との衝突を回避)
+3. `main` へ push → GitHub Pages が自動で再ビルド → **1〜2分でライブ反映**
+
+- **前提**: このリポジトリへ push できる GitHub 認証が済んでいること(初回はブラウザ認証)。
+- **衝突したとき**: メッセージの指示どおり `git pull origin main` で解消してから再実行。
+- これは**フロントエンド(index.html)専用**です。バックエンド(Apps Script)の反映は
+  `node backend/deploy/deploy.js`(下記)を使ってください。
+
+---
+
 ## 運用フロー (まとめ)
 
 ```
@@ -99,12 +130,14 @@ cd "$env:USERPROFILE\tanpopo-sharoushi"; git add -A; if(git status --porcelain){
 [Claude Code on the web (D) ★おすすめ★]
   1. https://claude.ai/code で sharoushi-houkoku を開く
   2. 「○○を変更して」と依頼 → Claude が作業ブランチに push
-  3. 「PRを作って」→ GitHub で Merge → ライブ反映
+  3. 「公開して」→ Claude が node deploy.js を実行 → ライブ反映
+     (レビューしたいときは「PRを作って」→ GitHub で Merge でもOK)
 ```
 
 - ローカル運用 (C) は main へ直接 push するため、GitHub の Web 画面での PR マージは不要です。
 - ローカルの Claude Code には「作業フォルダは %USERPROFILE%\tanpopo-sharoushi」と伝えればOK。
-- web 運用 (D) は公開の最後に PR を1回マージするだけ。PC へのインストールは一切不要です。
+- どの環境でも `node deploy.js`(E)で公開できます。web 運用なら Claude に「公開して」で完了。
+- PC へのインストールは一切不要です(web 運用)。
 
 ---
 

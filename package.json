@@ -1,0 +1,9 @@
+{
+  "name": "sharoushi-houkoku",
+  "version": "1.0.0",
+  "private": true,
+  "description": "社労士報告イントラ (フロントエンド)。node deploy.js でライブサイトへ公開。",
+  "scripts": {
+    "deploy": "node deploy.js"
+  }
+}
