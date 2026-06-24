@@ -1,10 +1,17 @@
-# 複数デバイス運用ガイド (PowerShell コピペのみ)
+# 複数デバイス運用ガイド
 
-このリポジトリ (社労士報告イントラ) を、複数のPCから GitHub 経由で
-編集・公開するための手順。すべて **PowerShell に貼り付けるだけ** で完結します。
+このリポジトリ (社労士報告イントラ) を、複数の環境から GitHub 経由で
+編集・公開するための手順です。作業環境は2通りあります。
+
+- **ローカルPC (Windows / PowerShell)** … → このページの A〜C
+- **Claude Code on the web (ブラウザ / スマホからでもOK)** … → このページの D ★おすすめ★
+
+共通情報:
 
 - ライブサイト: https://tanpopo-ai.github.io/sharoushi-houkoku/
-- ローカル作業フォルダ: `%USERPROFILE%\tanpopo-sharoushi` (OneDrive外 = 安全)
+- GitHub リポジトリ: https://github.com/tanpopo-ai/sharoushi-houkoku
+- 公開のしくみ: **`main` ブランチ**に入った内容が GitHub Pages で自動公開される(1〜2分後に反映)
+- ローカル作業フォルダ (PowerShell運用時): `%USERPROFILE%\tanpopo-sharoushi` (OneDrive外 = 安全)
 
 ---
 
@@ -46,17 +53,58 @@ cd "$env:USERPROFILE\tanpopo-sharoushi"; git add -A; if(git status --porcelain){
 
 ---
 
+## D. Claude Code on the web で作業する場合 (★おすすめ・PCソフト不要★)
+
+ブラウザ(スマホ・タブレット可)から https://claude.ai/code を開くだけで、
+**Git も PowerShell も自分の端末に入れずに**このプロジェクトを編集・公開できます。
+リポジトリはセッション開始時に自動でクラウドにクローンされるので、初回セットアップは不要です。
+
+### 手順
+
+1. **https://claude.ai/code** を開く
+2. リポジトリ **`tanpopo-ai/sharoushi-houkoku`** を選んでセッションを開始
+3. チャットで「○○を変更して」と日本語で依頼する
+   - 例:「個人別タブに△△の列を追加して」「トップの集計から□□を除外して」
+4. Claude が編集し、`claude/...` という**作業ブランチに自動で commit & push** します
+5. **ライブサイトに公開するには `main` への取り込みが必要**です。次のいずれか:
+   - Claude に「**プルリクエストを作って**」と頼む → 作られた PR を GitHub 上で **Merge**
+   - または GitHub の画面で該当ブランチから main へ PR を作成し Merge
+6. main にマージされると 1〜2分後にライブサイトへ自動反映(ブラウザは Ctrl+Shift+R)
+
+### ローカル(A〜C)との違い
+
+| | ローカル PowerShell (A〜C) | Claude Code on the web (D) |
+|---|---|---|
+| 必要なもの | PC・Git・PowerShell | ブラウザだけ(スマホ可) |
+| 編集場所 | `%USERPROFILE%\tanpopo-sharoushi` | クラウド(セッション毎に自動クローン) |
+| 公開方法 | `git push`(C を貼り付け)で main へ直接 | 作業ブランチ → **PR を Merge** で main へ |
+| 反映 | どちらも main 反映後 1〜2分でライブ更新 | 同左 |
+
+### 注意点
+
+- クラウド環境は**セッション終了で破棄**されます。残したい変更は必ず **push / PR マージ**まで済ませること(Claude が自動で push するので通常は気にしなくてOK)。
+- **公開の最後の一押し(PR の Merge)だけは人が行う**運用です。意図しない公開を防ぐため、Claude は main へ直接 push しません。
+- バックエンド `backend/apps_script.gs` を変更した場合の Apps Script への反映は、ローカルと同じく手動です(下記セクション参照)。
+
+---
+
 ## 運用フロー (まとめ)
 
 ```
-[どのデバイスでも]
+[ローカル PowerShell (A〜C)]
   1. B (最新取得) を貼り付け
   2. Claude Code に「○○を変更して」と依頼 → Claudeがこのフォルダを編集
-  3. C (公開) を貼り付け → ライブ反映
+  3. C (公開) を貼り付け → ライブ反映 (main へ直接 push)
+
+[Claude Code on the web (D) ★おすすめ★]
+  1. https://claude.ai/code で sharoushi-houkoku を開く
+  2. 「○○を変更して」と依頼 → Claude が作業ブランチに push
+  3. 「PRを作って」→ GitHub で Merge → ライブ反映
 ```
 
-- もう GitHub の Web 画面で PR をマージする必要はありません。
-- Claude Code には「作業フォルダは %USERPROFILE%\tanpopo-sharoushi」と伝えればOK。
+- ローカル運用 (C) は main へ直接 push するため、GitHub の Web 画面での PR マージは不要です。
+- ローカルの Claude Code には「作業フォルダは %USERPROFILE%\tanpopo-sharoushi」と伝えればOK。
+- web 運用 (D) は公開の最後に PR を1回マージするだけ。PC へのインストールは一切不要です。
 
 ---
 
