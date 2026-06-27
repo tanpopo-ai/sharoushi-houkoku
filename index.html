@@ -550,12 +550,53 @@
   <section class="view" id="view-care">
     <div class="panel">
       <h2>託児時間報告 ― 月次集計・託児費用（従業員別）</h2>
-      <div class="formula">
-        <div>① 利用時間 = <code>(AM終了 − AM開始) + (PM終了 − PM開始)</code> を当月分合算（10分単位で集計）</div>
-        <div>② 託児費用 = <code>利用時間 ÷ 10分 × 50円</code>（1時間300円・10分単位／端数切り上げ）</div>
-        <div>③ 給与天引き額 = <code>min(託児費用, 月額上限 ¥35,000)</code></div>
-        <div class="muted" style="margin-top:4px">※ 子どもの人数に関わらず、従業員ごとの月間利用時間のみで算定します。</div>
-      </div>
+      <!-- 計算ルール（明記 + イントラ上で変更可能） -->
+      <div class="formula" id="care-rule-desc"></div>
+
+      <details id="care-rule-edit" style="margin:10px 0 14px">
+        <summary style="cursor:pointer;font-weight:600;color:#2563eb">⚙ 計算ルールを変更する（クリックで開く）</summary>
+        <div style="margin-top:10px;padding:12px 14px;border:1px solid #d8dee9;border-radius:8px;background:#f8fafc">
+          <div style="display:flex;flex-wrap:wrap;gap:14px 22px;align-items:flex-end">
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>① これより前は数えない<br><span class="muted">（AM開始のクリップ時刻）</span></span>
+              <input type="time" id="cr-cutoff" step="60" style="padding:4px 6px;font-size:14px">
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>② 午後利用の判定時刻<br><span class="muted">（これ以降も利用で控除対象）</span></span>
+              <input type="time" id="cr-afternoon" step="60" style="padding:4px 6px;font-size:14px">
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>② 控除する時間<br><span class="muted">（②該当日ごと）</span></span>
+              <span><input type="number" id="cr-deduct" min="0" step="0.5" style="width:72px;padding:4px 6px;font-size:14px"> 時間</span>
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>③ 端数切り捨て単位<br><span class="muted">（1日ごと）</span></span>
+              <span><input type="number" id="cr-round" min="0" step="5" style="width:72px;padding:4px 6px;font-size:14px"> 分未満</span>
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>④ 単価</span>
+              <span>¥<input type="number" id="cr-rate" min="0" step="10" style="width:84px;padding:4px 6px;font-size:14px"> /時</span>
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>④ 月額上限</span>
+              <span>¥<input type="number" id="cr-cap" min="0" step="1000" style="width:96px;padding:4px 6px;font-size:14px"></span>
+            </label>
+            <label style="display:flex;flex-direction:column;font-size:13px;gap:3px">
+              <span>⑤ 土曜は①②の時刻を<br><span class="muted">（○分 前倒し）</span></span>
+              <span><input type="number" id="cr-satshift" min="0" step="5" style="width:72px;padding:4px 6px;font-size:14px"> 分 前倒し</span>
+            </label>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button type="button" id="cr-save" class="btn" style="background:#2563eb;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-weight:600;cursor:pointer">保存して再計算</button>
+            <button type="button" id="cr-reset" class="btn" style="background:#e5e7eb;border:none;padding:7px 14px;border-radius:6px;cursor:pointer">既定値に戻す</button>
+            <span id="cr-saved" class="muted" style="font-size:12px"></span>
+          </div>
+          <div class="muted" style="margin-top:8px;font-size:12px">
+            ※ 変更内容はこの端末のブラウザに保存され、次回以降も適用されます。社労士へ報告する金額に直結するため、変更時はご注意ください。
+          </div>
+        </div>
+      </details>
+
       <div id="care-summary"></div>
     </div>
   </section>
@@ -726,22 +767,125 @@
 const SHEET_ID = "1oQuCoAES6X7e2b0rOURLDUiYVHeAwZ-ybVcn7vH1Wvc";
 const GIDS = { leave: "0", care: "652314846" };
 
-/* ---- 託児費用の計算ルール（社労士へ報告し給与天引きする金額の算定基準）----
-   ・1時間 300円  ・料金計算は10分単位（端数切り上げ）
-   ・1人あたり月額上限 35,000円
-   ・子どもの人数に関わらず、利用時間のみで算定                              */
-const FEE = { ratePerHour: 300, unitMinutes: 10, monthlyCap: 35000 };
-const FEE_PER_UNIT = FEE.ratePerHour * FEE.unitMinutes / 60;   // 10分 = 50円
+/* ============================================================
+   託児時間・託児費用の計算ルール（★イントラ上で変更可能★）
+   社労士へ報告し給与天引きする金額の算定基準。既定値:
+   ① 9:30 より前の託児時間はカウントしない（AM開始を 9:30 にクリップ）
+   ② 9:30 までに開始 かつ 13:00 以降にも利用がある日は、その日の利用時間から 1 時間を控除
+   ③ 1 日ごとに 30 分未満の端数は切り捨て
+   ④ 料金 = 上記で算出した利用時間 × ¥300/時（1人あたり月額上限 ¥35,000）
+   ※ 子どもの人数に関わらず、従業員ごとの利用時間のみで算定
+   ============================================================ */
+const CARE_RULES_LS = "care-rules-v1";
+const CARE_RULES_DEFAULT = {
+  cutoffStart:        9.5,    // ① 朝のクリップ時刻（時, 9.5 = 9:30）
+  afternoonThreshold: 13,     // ② 午後利用の判定時刻（時, 13 = 13:00）
+  deductHours:        1,      // ② 控除する時間（時）
+  roundUnitMin:       30,     // ③ 端数切り捨て単位（分, 1日ごと）
+  ratePerHour:        300,    // ④ 単価（円/時）
+  monthlyCap:         35000,  // ④ 月額上限（円）
+  satShiftMin:        30      // ⑤ 土曜日は①②の各時刻を○分 前倒し（分）
+};
+const CARE_RULES_KEYS = Object.keys(CARE_RULES_DEFAULT);
+let CARE_RULES = { ...CARE_RULES_DEFAULT };
+function loadCareRules(){
+  try{
+    const j = JSON.parse(localStorage.getItem(CARE_RULES_LS) || "null");
+    if(j && typeof j === "object") CARE_RULES = { ...CARE_RULES_DEFAULT, ...j };
+  }catch(e){ /* ignore */ }
+}
+function saveCareRules(){
+  try{ localStorage.setItem(CARE_RULES_LS, JSON.stringify(CARE_RULES)); }catch(e){}
+}
+/* ---- サーバ共有（全端末で同じルール）---- */
+/* 数値のみのクリーンなルールオブジェクトに整える */
+function sanitizeCareRules(obj){
+  const clean = {};
+  if(obj && typeof obj === "object"){
+    for(const k of CARE_RULES_KEYS){
+      const v = Number(obj[k]);
+      if(isFinite(v)) clean[k] = v;
+    }
+  }
+  return { ...CARE_RULES_DEFAULT, ...clean };
+}
+/* サーバ(Apps Script)から共有ルールを取得して適用。失敗時は localStorage / 既定値のまま */
+function loadCareRulesFromServer(){
+  if(typeof callApi !== "function") return Promise.resolve(false);
+  return callApi("carerules").then(data => {
+    if(data && data.rules){
+      CARE_RULES = sanitizeCareRules(data.rules);
+      saveCareRules();            // この端末にもキャッシュ
+      syncCareRuleInputs();
+      refreshAll();
+      return true;
+    }
+    return false;
+  }).catch(e => { console.warn("carerules load failed:", e); return false; });
+}
+/* 共有ルールをサーバへ保存 */
+function saveCareRulesToServer(){
+  if(typeof callApi !== "function") return Promise.reject(new Error("APIが利用できません"));
+  return callApi("set_carerules", { payload: JSON.stringify(CARE_RULES) })
+    .then(data => { if(data && data.error) throw new Error(data.error); return data; });
+}
+/* "09:30" ⇄ 9.5（小数時間）の相互変換 */
+function hhmmToHours(s){
+  const m = String(s||"").match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  return (+m[1]) + (+m[2])/60;
+}
+function hoursToHHMM(h){
+  if(h==null || isNaN(h)) return "";
+  const t = Math.round(h*60);
+  return `${pad2(Math.floor(t/60))}:${pad2(((t%60)+60)%60)}`;
+}
+
 const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
 
-/* 月間利用時間(小数h) → 託児費用の算定結果 */
+/* レコードの曜日 (0=日 .. 6=土)。日付が無ければ null */
+function careDow(rec){
+  if(!rec || !rec.date) return null;
+  return new Date(rec.date.y, rec.date.m-1, rec.date.d).getDay();
+}
+/* 1日の託児レコード → ルール①②③（⑤土曜前倒し）適用後の利用時間(小数h) */
+function careAdjustedHours(rec, rules){
+  const R = rules || CARE_RULES;
+  // ⑤ 土曜日は①②の各時刻を satShiftMin 分 前倒し（早める）
+  let cutoff = R.cutoffStart, afternoon = R.afternoonThreshold;
+  const isSat = (careDow(rec) === 6);
+  if(isSat && R.satShiftMin){
+    const s = R.satShiftMin/60;
+    cutoff -= s; afternoon -= s;
+  }
+  // ① cutoff より前は数えない（AM開始を cutoff にクリップ）
+  let amH = 0;
+  if(rec.amS!=null && rec.amE!=null && rec.amE>rec.amS){
+    amH = Math.max(0, rec.amE - Math.max(rec.amS, cutoff));
+  }
+  const pmH = (rec.pmS!=null && rec.pmE!=null && rec.pmE>rec.pmS) ? rec.pmE-rec.pmS : 0;
+  let dayH = amH + pmH;
+  // ② cutoff までに開始 かつ afternoon 以降にも利用がある日は deductHours を控除
+  const startedEarly  = (rec.amS!=null && rec.amS <= cutoff);
+  const usedAfternoon = (rec.pmE!=null && rec.pmE > afternoon);
+  const deducted = startedEarly && usedAfternoon;
+  if(deducted) dayH = Math.max(0, dayH - R.deductHours);
+  // ③ 1日ごとに端数（roundUnitMin 分未満）を切り捨て
+  let hours = dayH;
+  if(R.roundUnitMin > 0){
+    const unitH = R.roundUnitMin/60;
+    hours = Math.floor((dayH + 1e-9) / unitH) * unitH;
+  }
+  return { amH, pmH, rawDayH: amH+pmH, deducted, isSat, hours };
+}
+
+/* 月間利用時間(小数h, ①②③適用後) → 託児費用の算定結果（④ 単価×時間・月額上限） */
 function calcFee(hours){
-  const totalMin  = Math.round((hours || 0) * 60);              // 浮動小数の誤差を吸収
-  const units     = Math.ceil(totalMin / FEE.unitMinutes);      // 10分単位（切り上げ）
-  const chargeMin = units * FEE.unitMinutes;                    // 課金対象の分数
-  const raw       = units * FEE_PER_UNIT;                       // 上限適用前の費用
-  const billed    = Math.min(raw, FEE.monthlyCap);              // 給与天引き額
-  return { chargeMin, raw, billed, capped: raw > FEE.monthlyCap };
+  const R = CARE_RULES;
+  const chargeMin = Math.round((hours || 0) * 60);   // 課金対象の分数（既に①②③適用済）
+  const raw       = (hours || 0) * R.ratePerHour;    // 利用時間 × 単価
+  const billed    = Math.min(raw, R.monthlyCap);     // 給与天引き額
+  return { chargeMin, raw, billed, capped: raw > R.monthlyCap };
 }
 
 /* ---- アプリ状態 ---- */
@@ -1121,14 +1265,20 @@ function filterByEmp(arr, emp, key){
   return emp === "ALL" ? arr : arr.filter(r => r[key] === emp);
 }
 
-/* 託児：従業員別集計（月間利用時間 → 託児費用を算定） */
+/* 託児：従業員別集計（ルール①②③で日次調整 → 月間利用時間 → 託児費用を算定） */
 function aggregateCare(recs){
   const map = new Map();
   for(const r of recs){
     if(!map.has(r.employee))
-      map.set(r.employee, { name:r.employee, days:0, amH:0, pmH:0, hours:0 });
+      map.set(r.employee, { name:r.employee, days:0, amH:0, pmH:0,
+                            rawHours:0, hours:0, deductDays:0 });
     const o = map.get(r.employee);
-    o.days++; o.amH += r.amH; o.pmH += r.pmH; o.hours += r.hours;
+    const a = careAdjustedHours(r, CARE_RULES);   // ①②③を1日ごとに適用
+    o.days++;
+    o.amH += a.amH; o.pmH += a.pmH;
+    o.rawHours += r.hours;   // 元の報告どおりの利用時間（参考表示用）
+    o.hours    += a.hours;   // ①②③適用後の課金対象時間
+    if(a.deducted) o.deductDays++;
   }
   const list = [...map.values()];
   for(const o of list) o.fee = calcFee(o.hours);   // 1人あたり月間で費用算定
@@ -1226,9 +1376,9 @@ function renderDashboard(){
   const m = curMonth(), e = curEmp();
   const care  = filterByEmp(filterByMonth(STATE.care, m), e, "employee");
   const leave = filterByEmp(filterByMonth(STATE.leave, m), e, "applicant");
-  const careH  = care.reduce((s,r) => s+r.hours, 0);
   const leaveD = leave.reduce((s,r) => s+r.days, 0);
   const cAgg   = aggregateCare(care);
+  const careH  = cAgg.reduce((s,o) => s+o.hours, 0);   // ①②③適用後の合計利用時間
   const feeRaw    = cAgg.reduce((s,o) => s+o.fee.raw, 0);
   const feeBilled = cAgg.reduce((s,o) => s+o.fee.billed, 0);
   const cappedCnt = cAgg.filter(o => o.fee.capped).length;
@@ -1238,18 +1388,86 @@ function renderDashboard(){
   box.innerHTML =
     card("month","対象月", m==="ALL"?"全期間":ymLabel(m), e==="ALL"?"全従業員":esc(e)) +
     card("care","託児時間 報告件数", `${care.length} 件`, "提出された日次報告") +
-    card("care","託児 利用時間 合計", careH.toFixed(2)+" h", fmtHours(careH).replace(/^[\d.]+ h/,"").replace(/[（）]/g,"")) +
+    card("care","託児 利用時間 合計", careH.toFixed(2)+" h", "①②③適用後 "+fmtHours(careH).replace(/^[\d.]+ h/,"").replace(/[（）]/g,"")) +
     card("care","給与天引き額 合計", yen(feeBilled),
          `託児費用 ${yen(feeRaw)}` + (cappedCnt?`／上限適用 ${cappedCnt}名`:"")) +
     card("leave","休暇申請 件数", `${leave.length} 件`, "提出された申請") +
     card("leave","休暇日数 合計", `${leaveD} 日`, "申請日数の合計");
   $("#dash-note").textContent =
-    "※ 託児費用は ¥300/時・10分単位（端数切り上げ）で算定し、月額上限¥35,000を適用した「給与天引き額」を社労士へ報告します。" +
+    `※ 託児費用は 利用時間（①${hoursToHHMM(CARE_RULES.cutoffStart)}前は除外 ②早朝開始+午後利用の日は${CARE_RULES.deductHours}時間控除 ③1日ごと${CARE_RULES.roundUnitMin}分未満切捨）× ¥${CARE_RULES.ratePerHour}/時 で算定し、` +
+    `月額上限${yen(CARE_RULES.monthlyCap)}を適用した「給与天引き額」を社労士へ報告します。計算ルールは「託児時間 月次集計」タブで変更できます。` +
     "託児報告の月振り分けはタイムスタンプの日付を基準にしています。";
+}
+
+/* ---- 託児: 計算ルールの明記・編集 ---- */
+function renderCareRuleDesc(){
+  const box = $("#care-rule-desc");
+  if(!box) return;
+  const R = CARE_RULES;
+  const cut = hoursToHHMM(R.cutoffStart), aft = hoursToHHMM(R.afternoonThreshold);
+  const satCut = hoursToHHMM(R.cutoffStart - (R.satShiftMin||0)/60);
+  const satAft = hoursToHHMM(R.afternoonThreshold - (R.satShiftMin||0)/60);
+  const satLine = (R.satShiftMin)
+    ? `<div>⑤ <strong>土曜日</strong>は①②の各時刻を <strong>${R.satShiftMin}分 前倒し</strong>（①→${satCut}／②→${satAft}）</div>`
+    : "";
+  box.innerHTML =
+    `<div style="font-weight:600;margin-bottom:4px">託児利用時間の計算ルール（給与天引き額の算定基準）</div>
+     <div>① <strong>${cut}</strong> より前の託児時間はカウントしない（AM開始を ${cut} にクリップ）</div>
+     <div>② <strong>${cut}</strong> までに託児を開始 かつ <strong>${aft}</strong> 以降にも利用がある日は、その日の利用時間から <strong>${R.deductHours}時間</strong> を控除</div>
+     <div>③ <strong>1日ごと</strong>に ${R.roundUnitMin}分未満の端数は切り捨て</div>
+     <div>④ 託児費用 = <code>①②③適用後の利用時間 × ¥${R.ratePerHour}/時</code> ／ 給与天引き額 = <code>min(託児費用, 月額上限 ¥${R.monthlyCap.toLocaleString("ja-JP")})</code></div>
+     ${satLine}
+     <div class="muted" style="margin-top:4px">※ 子どもの人数に関わらず、従業員ごとの月間利用時間のみで算定します。上記の数値は下の「⚙ 計算ルールを変更する」で変更でき、<strong>全端末で共有</strong>されます。</div>`;
+}
+function syncCareRuleInputs(){
+  const R = CARE_RULES;
+  const set = (id,v) => { const el = $(id); if(el) el.value = v; };
+  set("#cr-cutoff",    hoursToHHMM(R.cutoffStart));
+  set("#cr-afternoon", hoursToHHMM(R.afternoonThreshold));
+  set("#cr-deduct",    R.deductHours);
+  set("#cr-round",     R.roundUnitMin);
+  set("#cr-rate",      R.ratePerHour);
+  set("#cr-cap",       R.monthlyCap);
+  set("#cr-satshift",  R.satShiftMin);
+}
+function applyCareRulesFromInputs(){
+  const num = (id,def) => { const v = parseFloat($(id)?.value); return isNaN(v) ? def : v; };
+  const cut = hhmmToHours($("#cr-cutoff")?.value);
+  const aft = hhmmToHours($("#cr-afternoon")?.value);
+  CARE_RULES = {
+    cutoffStart:        cut!=null ? cut : CARE_RULES_DEFAULT.cutoffStart,
+    afternoonThreshold: aft!=null ? aft : CARE_RULES_DEFAULT.afternoonThreshold,
+    deductHours:        Math.max(0, num("#cr-deduct",   CARE_RULES_DEFAULT.deductHours)),
+    roundUnitMin:       Math.max(0, num("#cr-round",    CARE_RULES_DEFAULT.roundUnitMin)),
+    ratePerHour:        Math.max(0, num("#cr-rate",     CARE_RULES_DEFAULT.ratePerHour)),
+    monthlyCap:         Math.max(0, num("#cr-cap",      CARE_RULES_DEFAULT.monthlyCap)),
+    satShiftMin:        Math.max(0, num("#cr-satshift", CARE_RULES_DEFAULT.satShiftMin))
+  };
+  saveCareRules();           // この端末にキャッシュ
+  syncCareRuleInputs();      // 正規化した値を入力欄へ反映
+  refreshAll();              // 過去分も含め全データを再計算
+  const s = $("#cr-saved");
+  if(s) s.textContent = "保存中…（全端末へ共有）";
+  saveCareRulesToServer()
+    .then(() => { if(s){ s.textContent = "✓ 保存しました（全端末で共有・再計算済み）"; setTimeout(()=>{ s.textContent=""; }, 5000); } })
+    .catch(e => { if(s) s.textContent = "⚠ この端末には反映済みですが共有保存に失敗: " + (e.message||e); });
+}
+function resetCareRules(){
+  CARE_RULES = { ...CARE_RULES_DEFAULT };
+  saveCareRules();
+  syncCareRuleInputs();
+  refreshAll();
+  const s = $("#cr-saved");
+  if(s) s.textContent = "保存中…（全端末へ共有）";
+  saveCareRulesToServer()
+    .then(() => { if(s){ s.textContent = "✓ 既定値に戻しました（全端末で共有）"; setTimeout(()=>{ s.textContent=""; }, 5000); } })
+    .catch(e => { if(s) s.textContent = "⚠ この端末には反映済みですが共有保存に失敗: " + (e.message||e); });
 }
 
 /* ---- 託児 月次集計 ---- */
 function renderCare(){
+  renderCareRuleDesc();
+  syncCareRuleInputs();
   const box = $("#care-summary");
   if(!STATE.care.length){
     box.innerHTML = `<div class="empty-state">託児時間報告フォームのデータが未読み込みです。</div>`;
@@ -1259,34 +1477,43 @@ function renderCare(){
   const recs = filterByEmp(filterByMonth(STATE.care, m), e, "employee");
   if(!recs.length){ box.innerHTML = `<div class="empty-state">対象条件に該当する報告はありません。</div>`; return; }
   const agg = aggregateCare(recs);
-  const hm = min => `${Math.floor(min/60)}時間${pad2(min%60)}分`;
+  const hm = min => `${Math.floor(min/60)}時間${pad2(Math.round(min%60))}分`;
+  const dH = CARE_RULES.deductHours;
   const tot = agg.reduce((s,o)=>({
-    days:s.days+o.days, hours:s.hours+o.hours,
+    days:s.days+o.days, rawHours:s.rawHours+o.rawHours, hours:s.hours+o.hours,
+    deductDays:s.deductDays+o.deductDays,
     chargeMin:s.chargeMin+o.fee.chargeMin, raw:s.raw+o.fee.raw, billed:s.billed+o.fee.billed
-  }), {days:0,hours:0,chargeMin:0,raw:0,billed:0});
+  }), {days:0,rawHours:0,hours:0,deductDays:0,chargeMin:0,raw:0,billed:0});
+  const dedCell = o => o.deductDays
+    ? `${o.deductDays}日 <span class="muted">(−${(o.deductDays*dH)}h)</span>` : "—";
   let html = `<table class="grid"><thead><tr>
     <th>従業員名</th><th class="num">報告日数</th>
-    <th class="num">利用時間 合計</th><th>課金対象時間<br><span class="muted">(10分単位)</span></th>
-    <th class="num">託児費用</th><th class="num">給与天引き額<br><span class="muted">(上限¥35,000)</span></th>
+    <th class="num">報告利用時間<br><span class="muted">(元の合計)</span></th>
+    <th class="num">②控除<br><span class="muted">(該当日数)</span></th>
+    <th>課金対象時間<br><span class="muted">(①②③適用後)</span></th>
+    <th class="num">託児費用</th><th class="num">給与天引き額<br><span class="muted">(上限${yen(CARE_RULES.monthlyCap)})</span></th>
     </tr></thead><tbody>`;
   for(const o of agg){
     html += `<tr><td>${esc(o.name)}</td>
       <td class="num">${o.days}</td>
-      <td class="num">${o.hours.toFixed(2)} h</td>
+      <td class="num">${o.rawHours.toFixed(2)} h</td>
+      <td class="num">${dedCell(o)}</td>
       <td>${hm(o.fee.chargeMin)}</td>
       <td class="num">${yen(o.fee.raw)}</td>
       <td class="num">${yen(o.fee.billed)}${o.fee.capped?' <span class="pill">上限適用</span>':''}</td></tr>`;
   }
   html += `<tr class="total"><td>合計（${agg.length}名）</td>
     <td class="num">${tot.days}</td>
-    <td class="num">${tot.hours.toFixed(2)} h</td>
+    <td class="num">${tot.rawHours.toFixed(2)} h</td>
+    <td class="num">${tot.deductDays ? `${tot.deductDays}日 (−${(tot.deductDays*dH)}h)` : "—"}</td>
     <td>${hm(tot.chargeMin)}</td>
     <td class="num">${yen(tot.raw)}</td>
     <td class="num">${yen(tot.billed)}</td></tr>`;
   html += `</tbody></table>
     <p class="muted" style="margin-top:8px">
-      「給与天引き額」が社労士へ報告する金額です。上限¥35,000を超えた従業員には
-      <span class="pill">上限適用</span> を表示しています。AM/PMの内訳・各日の時間は「明細データ」タブで確認できます。
+      「課金対象時間」は上記①②③の計算ルールを適用した後の時間、「給与天引き額」が社労士へ報告する金額です。
+      上限${yen(CARE_RULES.monthlyCap)}を超えた従業員には <span class="pill">上限適用</span> を表示しています。
+      AM/PMの内訳・各日の時間は「明細データ」タブで確認できます。
     </p>`;
   box.innerHTML = html;
 }
@@ -1383,17 +1610,18 @@ function buildReportRows(){
   rows.push([]);
   /* 託児集計・費用 */
   rows.push(["■ 託児時間報告 月次集計・託児費用（従業員別）"]);
-  rows.push(["算定基準：1時間 ¥300（10分単位・端数切り上げ）／月額上限 ¥35,000／人数不問・利用時間のみで算定"]);
-  rows.push(["従業員名","報告日数","利用時間合計(h)","課金対象時間(分)","託児費用(円)","給与天引き額(円)","上限適用"]);
+  rows.push([`算定基準：①${hoursToHHMM(CARE_RULES.cutoffStart)}前は除外 ②早朝開始+${hoursToHHMM(CARE_RULES.afternoonThreshold)}以降利用の日は${CARE_RULES.deductHours}時間控除 ③1日ごと${CARE_RULES.roundUnitMin}分未満切捨 ④¥${CARE_RULES.ratePerHour}/時・月額上限¥${CARE_RULES.monthlyCap.toLocaleString("ja-JP")}・人数不問`]);
+  rows.push(["従業員名","報告日数","報告利用時間(h)","②控除日数","課金対象時間(分,適用後)","託児費用(円)","給与天引き額(円)","上限適用"]);
   const cAgg = aggregateCare(care);
-  let ct = {days:0,hours:0,chargeMin:0,raw:0,billed:0};
+  let ct = {days:0,rawHours:0,hours:0,deductDays:0,chargeMin:0,raw:0,billed:0};
   for(const o of cAgg){
-    rows.push([o.name,o.days,o.hours.toFixed(2),o.fee.chargeMin,
+    rows.push([o.name,o.days,o.rawHours.toFixed(2),o.deductDays,o.fee.chargeMin,
                Math.round(o.fee.raw),Math.round(o.fee.billed),o.fee.capped?"○":""]);
-    ct.days+=o.days; ct.hours+=o.hours; ct.chargeMin+=o.fee.chargeMin;
+    ct.days+=o.days; ct.rawHours+=o.rawHours; ct.hours+=o.hours;
+    ct.deductDays+=o.deductDays; ct.chargeMin+=o.fee.chargeMin;
     ct.raw+=o.fee.raw; ct.billed+=o.fee.billed;
   }
-  rows.push(["合計",ct.days,ct.hours.toFixed(2),ct.chargeMin,
+  rows.push(["合計",ct.days,ct.rawHours.toFixed(2),ct.deductDays,ct.chargeMin,
              Math.round(ct.raw),Math.round(ct.billed),""]);
   rows.push([]);
   /* 休暇集計 */
@@ -1547,11 +1775,17 @@ function initEvents(){
   $("#btn-print").addEventListener("click", () => window.print());
   $("#btn-csv").addEventListener("click", exportCSV);
   $("#btn-xls").addEventListener("click", exportXLS);
+  /* 託児 計算ルールの編集 */
+  const crSave = $("#cr-save"), crReset = $("#cr-reset");
+  if(crSave)  crSave.addEventListener("click", applyCareRulesFromInputs);
+  if(crReset) crReset.addEventListener("click", resetCareRules);
 }
 
 /* ---- 起動 ---- */
+loadCareRules();
 restore();
 initEvents();
+syncCareRuleInputs();
 refreshAll();
 
 
@@ -2699,6 +2933,11 @@ document.addEventListener("DOMContentLoaded", () => {
   setTimeout(() => {
     loadFormDataViaApi().catch(e => console.warn("formdata API failed:", e));
   }, 300);
+
+  // 3) 託児の計算ルールをサーバ(Apps Script)から取得し全端末で共有
+  setTimeout(() => {
+    if (typeof loadCareRulesFromServer === "function") loadCareRulesFromServer();
+  }, 200);
 });
 
 </script>

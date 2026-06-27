@@ -64,6 +64,12 @@ function doGet(e) {
       case "formdata":
         result = getFormData();
         break;
+      case "carerules":
+        result = getCareRules();
+        break;
+      case "set_carerules":
+        result = setCareRules(e.parameter.payload || "");
+        break;
       case "ping":
         result = { ok: true, time: new Date().toISOString() };
         break;
@@ -76,6 +82,42 @@ function doGet(e) {
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/* ============================================================
+ * 託児の計算ルール（全端末で共有）
+ *   ScriptProperties に JSON で保存。イントラの「託児時間 月次集計」タブ
+ *   から取得(carerules)・更新(set_carerules)される。
+ *   数値のみのホワイトリストでバリデーションしてから保存する。
+ * ============================================================ */
+const CARE_RULES_PROP_KEY = "careRules";
+const CARE_RULES_ALLOWED = [
+  "cutoffStart", "afternoonThreshold", "deductHours",
+  "roundUnitMin", "ratePerHour", "monthlyCap", "satShiftMin"
+];
+
+function getCareRules() {
+  const raw = PropertiesService.getScriptProperties().getProperty(CARE_RULES_PROP_KEY);
+  let rules = null;
+  if (raw) {
+    try { rules = JSON.parse(raw); } catch (e) { rules = null; }
+  }
+  return { rules: rules };   // 未設定なら rules:null → フロントは既定値を使う
+}
+
+function setCareRules(payload) {
+  if (!payload) throw new Error("payload がありません");
+  const obj = JSON.parse(payload);   // 不正JSONはここで例外
+  const clean = {};
+  CARE_RULES_ALLOWED.forEach(function (k) {
+    const v = Number(obj[k]);
+    if (isFinite(v) && v >= 0) clean[k] = v;
+  });
+  if (Object.keys(clean).length === 0) throw new Error("有効な数値がありません");
+  PropertiesService.getScriptProperties()
+    .setProperty(CARE_RULES_PROP_KEY, JSON.stringify(clean));
+  return { ok: true, rules: clean };
 }
 
 
