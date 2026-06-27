@@ -1,0 +1,35 @@
+{
+  "google": {
+    "oauth_client_secret": "oauth_client_secret.json",
+    "oauth_token": "token.json",
+    "spreadsheet_id": "1u5_a39MXF4SkbMH0sp9lsVLCJH67aSvE-8J_wQ3RSY8",
+    "worksheet_name": "勤務データログ",
+    "attendance_book_worksheet_name": "出勤簿ログ",
+    "summary_worksheet_name": "集計"
+  },
+  "jobcan": {
+    "login_url": "https://ssl.jobcan.jp/login/client",
+    "download_url": "https://ssl.jobcan.jp/client/down-work",
+    "attendance_book_url": "https://ssl.jobcan.jp/client/down-attendance",
+    "headless": true,
+    "download_dir": "downloads"
+  },
+  "extraction": {
+    "target": "this_month",
+    "_comment_target": "取得対象。'yesterday'=前日(指定日) / 'today'=当日(指定日) / 'this_month'=当月(指定月) / 'previous_month'=前月(指定月)"
+  },
+  "per_staff_settings": {
+    "enabled": true,
+    "_comment": "出勤簿の各スタッフごとに専用タブを作成し、勤務地判定/残業/特出時間の数式を付与する",
+    "thresholds": {
+      "branch_clock_in_at_or_before": "08:30",
+      "branch_clock_out_at_or_before": "19:00",
+      "special_overtime_threshold": "03:00",
+      "_comment": "分院判定: この時刻までに出勤+退勤の両方を満たす日 / 特出時間: シフト外労働時間がこの長さ以上"
+    },
+    "fixed_location_overrides": {
+      "杉原朋実": "本院",
+      "_comment": "氏名(コード抜き)をキーに固定勤務地を指定。氏名は完全一致。"
+    }
+  }
+}

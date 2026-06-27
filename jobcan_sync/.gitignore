@@ -1,0 +1,11 @@
+# 機密情報・実行時生成物はコミットしない
+token.json
+oauth_client_secret.json
+oauth_client_secret.json.json
+*service_account*.json
+downloads/
+logs/
+__pycache__/
+*.pyc
+*.png
+main.lock

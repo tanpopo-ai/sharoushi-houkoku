@@ -1,0 +1,7 @@
+playwright>=1.50
+gspread>=6.1
+google-auth>=2.36
+google-auth-oauthlib>=1.2
+keyring>=25
+python-dateutil>=2.9
+openpyxl>=3.1
