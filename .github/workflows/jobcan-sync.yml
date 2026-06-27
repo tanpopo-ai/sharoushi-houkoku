@@ -3,7 +3,7 @@ name: jobcan-sync
 # ジョブカン勤怠 → Googleスプレッドシート 自動取り込み (クラウド実行・PC不要)
 #   毎日 JST 0:30 に実行。手動実行(Run workflow)も可能。
 #   必要な Secrets: JOBCAN_CLIENT_ID / JOBCAN_LOGIN_ID / JOBCAN_PASSWORD /
-#                   GOOGLE_SERVICE_ACCOUNT_JSON   (jobcan_sync/SETUP.md 参照)
+#                   GOOGLE_OAUTH_TOKEN_JSON   (jobcan_sync/SETUP.md 参照)
 
 on:
   schedule:
@@ -26,7 +26,7 @@ jobs:
       JOBCAN_CLIENT_ID: ${{ secrets.JOBCAN_CLIENT_ID }}
       JOBCAN_LOGIN_ID: ${{ secrets.JOBCAN_LOGIN_ID }}
       JOBCAN_PASSWORD: ${{ secrets.JOBCAN_PASSWORD }}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_OAUTH_TOKEN_JSON: ${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}
     steps:
       - uses: actions/checkout@v4
 

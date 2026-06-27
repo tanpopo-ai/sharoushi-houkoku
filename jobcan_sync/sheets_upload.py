@@ -75,9 +75,23 @@ ACQUIRED_AT_HEADER = "取得日時"
 
 
 def _load_oauth_credentials(config: dict):
-    """Google認証情報を読み込む。
-    クラウド(GitHub Actions)では環境変数 GOOGLE_SERVICE_ACCOUNT_JSON の
-    サービスアカウントを優先。無ければ従来のOAuth(ローカルPC用)。"""
+    """Google認証情報を読み込む。優先順位:
+      1) GOOGLE_OAUTH_TOKEN_JSON (env)  … token.json の中身。クラウド推奨。
+      2) GOOGLE_SERVICE_ACCOUNT_JSON (env) … サービスアカウント(組織が許可している場合)
+      3) ローカルファイル (oauth_client_secret / token.json) … PC用・従来動作
+    """
+    # 1) OAuthトークン(token.json の中身)を環境変数から (組織ポリシーで鍵が作れない場合の推奨)
+    token_env = os.environ.get("GOOGLE_OAUTH_TOKEN_JSON")
+    if token_env:
+        info = json.loads(token_env)
+        creds = Credentials.from_authorized_user_info(info, SCOPES)
+        if not creds.valid and creds.expired and creds.refresh_token:
+            logger.info("アクセストークンを更新します (env token)。")
+            creds.refresh(Request())
+        logger.info("環境変数のOAuthトークンを使用します。")
+        return creds
+
+    # 2) サービスアカウント
     sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     if sa_json:
         from google.oauth2.service_account import Credentials as ServiceAccountCredentials
