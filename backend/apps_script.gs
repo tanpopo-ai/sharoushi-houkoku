@@ -525,6 +525,82 @@ function syncStaffNamesToForm() {
 }
 
 
+/* ============================================================
+ * ログ圧縮 (セル上限 10,000,000 対策)
+ *   毎日「その月の全データ」を取得日時付きで追記し続ける運用のため、
+ *   出勤簿ログ / 勤務データログ が肥大化してスプレッドシートのセル上限に達し、
+ *   Python側のアップロードが 400 (exceeds grid limits) で失敗する。
+ *
+ *   配信(getSummary/getStaffDetail)は「(キー)ごとに取得日時が最新の行」しか
+ *   使わないため、古い重複スナップショットを削除しても表示は一切変わらない。
+ *   compactLogs() は各ログを「キーごとの最新取得日時の行」だけに圧縮し、
+ *   余分な行を削除してセルを解放する。
+ *
+ *   実行: エディタで compactLogs を一度実行。
+ *   自動化: setupCompactTrigger を一度実行すると毎日自動圧縮(Python実行後)。
+ * ============================================================ */
+function compactLogs() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  // 出勤簿ログ: キー = スタッフ + 日付
+  compactTab_(ss, "出勤簿ログ", ["スタッフ", "日付"]);
+  // 勤務データログ: キー = スタッフコード + (年月日)
+  compactTab_(ss, "勤務データログ", ["スタッフコード", "年月日"]);
+  Logger.log("=== compactLogs 完了 ===");
+}
+
+/**
+ * 指定タブを「キーごとに取得日時が最新の行のみ」へ圧縮し、余剰行を削除する。
+ * 列が特定できない場合は安全のため何もしない。
+ */
+function compactTab_(ss, name, keyParts) {
+  const ws = ss.getSheetByName(name);
+  if (!ws) { Logger.log("compact skip (タブ無し): " + name); return; }
+  const lastRow = ws.getLastRow(), lastCol = ws.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) { Logger.log("compact skip (空): " + name); return; }
+
+  const vals = ws.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  const header = vals[0];
+  const acqIdx = header.findIndex(h => String(h).indexOf("取得日時") >= 0);
+  const keyIdx = keyParts.map(k => header.findIndex(h => String(h).indexOf(k) >= 0));
+  if (acqIdx < 0 || keyIdx.some(i => i < 0)) {
+    Logger.log("compact 中止 (列特定失敗) " + name + " header=" + header.join(","));
+    return;
+  }
+
+  const latest = {}, order = [];
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    if (row.every(c => String(c).trim() === "")) continue; // 完全空行スキップ
+    const key = keyIdx.map(j => row[j]).join("");
+    const acq = String(row[acqIdx] || "");
+    if (!(key in latest)) { latest[key] = row; order.push(key); }
+    else if (String(latest[key][acqIdx]) <= acq) { latest[key] = row; }
+  }
+  const out = [header];
+  order.forEach(k => out.push(latest[k]));
+  const before = lastRow - 1, after = out.length - 1;
+  if (after >= before) { Logger.log(name + ": 圧縮不要 (" + before + "行)"); return; }
+
+  // 書き戻し: 全クリア → 最新のみ書込 → 余剰行を削除してセル解放
+  ws.clearContents();
+  ws.getRange(1, 1, out.length, header.length).setValues(out);
+  const keep = out.length + 50;
+  const maxRows = ws.getMaxRows();
+  if (maxRows > keep) ws.deleteRows(keep + 1, maxRows - keep);
+  Logger.log(name + ": " + before + "行 → " + after + "行 に圧縮 (余剰削除)");
+}
+
+/** compactLogs を毎日自動実行するトリガーを作成 (既存があれば作り直し)。 */
+function setupCompactTrigger() {
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === "compactLogs") ScriptApp.deleteTrigger(t);
+  });
+  // Python取込(深夜0時台)の後、毎日3時台に圧縮
+  ScriptApp.newTrigger("compactLogs").timeBased().atHour(3).everyDays(1).create();
+  Logger.log("compactLogs の毎日トリガーを作成しました (3時台)");
+}
+
+
 /**
  * 時刻文字列または時刻シリアル数値を秒数に変換。
  */
