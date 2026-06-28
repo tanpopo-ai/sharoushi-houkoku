@@ -44,6 +44,7 @@ const SPECIAL_THRESHOLD_SECONDS = 3 * 3600;
 const EXCLUDED_TABS = [
   "勤務データログ", "出勤簿ログ", "集計", "シート1", "Sheet1",
   "ふりがな", "休暇申請フォーム", "フォームの回答 1", "フォームの回答1",
+  "勤務形態マスタ",
 ];
 
 
@@ -70,11 +71,48 @@ function doGet(e) {
       case "set_carerules":
         result = setCareRules(e.parameter.payload || "");
         break;
+      case "work_patterns":
+        result = getWorkPatterns();
+        break;
+      case "set_work_patterns":
+        result = setWorkPatterns(e.parameter.payload || "");
+        break;
+      case "seed_work_patterns":
+        result = { data: seedWorkPatterns() };
+        break;
       case "ping":
         result = { ok: true, time: new Date().toISOString() };
         break;
       default:
         throw new Error("Unknown action: " + action);
+    }
+  } catch (err) {
+    result = { error: String(err && err.message || err) };
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * POST エンドポイント。大きな payload (勤務形態マスタ等) の保存用。
+ * 本文(text/plain) に JSON を入れて送る。action はクエリ or 本文の action。
+ */
+function doPost(e) {
+  let result;
+  try {
+    const body = (e && e.postData && e.postData.contents) || "";
+    const action = (e && e.parameter && e.parameter.action) ||
+                   (body ? (JSON.parse(body).action || "") : "");
+    switch (action) {
+      case "set_work_patterns":
+        result = setWorkPatterns(body);
+        break;
+      case "set_carerules":
+        result = setCareRules(body);
+        break;
+      default:
+        throw new Error("Unknown POST action: " + action);
     }
   } catch (err) {
     result = { error: String(err && err.message || err) };
@@ -619,4 +657,110 @@ function parseTimeToSeconds(v) {
   const n = parseFloat(s);
   if (isNaN(n)) return 0;
   return Math.round(n * 86400);
+}
+
+
+/* ============================================================
+ * 勤務形態マスタ (定時 + 変則パターンA〜G + スタッフ割当)
+ *   ・全端末で共有するため ScriptProperties に JSON 保存。
+ *   ・併せて「勤務形態マスタ」シートにも読みやすく出力(閲覧用)。
+ *   ・イントラの「勤務形態」タブから取得(work_patterns)/更新(set_work_patterns)。
+ *   days = { 曜日: [開始, 終了, 休憩, (勤務地)] }  曜日は 日月火水木金土。
+ * ============================================================ */
+const WORK_PATTERNS_PROP = "workPatterns";
+const WORK_PATTERNS_SHEET = "勤務形態マスタ";
+
+function getWorkPatterns() {
+  const raw = PropertiesService.getScriptProperties().getProperty(WORK_PATTERNS_PROP);
+  let data = null;
+  if (raw) { try { data = JSON.parse(raw); } catch (e) { data = null; } }
+  if (!data || !Array.isArray(data.patterns)) data = defaultWorkPatterns_();
+  return { data: data };
+}
+
+function setWorkPatterns(payload) {
+  if (!payload) throw new Error("payload がありません");
+  const obj = JSON.parse(payload);
+  if (!obj || !Array.isArray(obj.patterns)) throw new Error("patterns 配列が必要です");
+  if (!obj.assignments || typeof obj.assignments !== "object") obj.assignments = {};
+  PropertiesService.getScriptProperties().setProperty(WORK_PATTERNS_PROP, JSON.stringify(obj));
+  try { renderWorkPatternSheet_(obj); } catch (e) { /* シート出力失敗は致命的でない */ }
+  return { ok: true, data: obj };
+}
+
+/** 初期データ(定時+A〜G)を投入。エディタで一度実行 or ?action=seed_work_patterns。 */
+function seedWorkPatterns() {
+  const d = defaultWorkPatterns_();
+  PropertiesService.getScriptProperties().setProperty(WORK_PATTERNS_PROP, JSON.stringify(d));
+  renderWorkPatternSheet_(d);
+  return d;
+}
+
+function defaultWorkPatterns_() {
+  const honin = { "日": ["9:25","20:30","1:05"], "月": ["9:25","20:30","1:05"], "火": ["9:25","20:30","1:05"],
+                  "水": ["9:25","20:30","1:05"], "木": ["9:25","20:30","1:05"], "金": ["9:25","20:30","1:05"],
+                  "土": ["8:55","20:00","1:05"] };
+  const bunin = { "木": ["8:30","18:30","1:00"], "金": ["8:30","18:30","1:00"], "土": ["8:30","18:30","1:00"],
+                  "日": ["8:30","18:30","1:00"], "月": ["8:30","18:30","1:00"], "火": ["8:30","18:30","1:00"] };
+  const idou  = { "日": ["9:00","20:05","1:05"], "月": ["9:00","20:05","1:05"], "火": ["9:00","20:05","1:05"],
+                  "水": ["9:00","20:05","1:05"], "木": ["9:00","20:05","1:05"], "金": ["9:00","20:05","1:05"],
+                  "土": ["8:30","19:35","1:05"] };
+  return {
+    patterns: [
+      { id: "本院", name: "本院 標準(定時)", kind: "標準", note: "日〜金 9:25-20:30 / 土 8:55-20:00 休1:05", days: honin },
+      { id: "分院", name: "分院 標準(定時)", kind: "標準", note: "木〜火 8:30-18:30 休1:00", days: bunin },
+      { id: "移動", name: "AM分院→PM本院", kind: "標準", note: "1日内で移動がある日のみ", days: idou },
+      { id: "A", name: "Aパターン(志賀 愛)", kind: "変則", weeklyNormal: "29:00", remote: "6:00",
+        note: "リモートワーク6h/週(申請フォーム予定)",
+        days: { "火": ["9:25","17:30","1:05"], "木": ["9:25","17:30","1:05"], "金": ["9:25","17:30","1:05"], "土": ["8:55","18:00","1:05"] } },
+      { id: "B", name: "Bパターン(田中 歩美)", kind: "変則", weeklyNormal: "40:00", remote: "",
+        days: { "月": ["9:25","17:30","0:50"], "水": ["12:30","20:00","0:00"], "木": ["9:25","17:30","0:50"], "金": ["9:25","20:00","0:50"], "日": ["9:25","18:30","0:50"] } },
+      { id: "C", name: "Cパターン(相原(安藤)南美)", kind: "変則", weeklyNormal: "27:30", remote: "7:30",
+        note: "リモートワーク7.5h/週(申請フォーム予定)・全日夕休憩なし",
+        days: { "月": ["9:25","16:00","0:50"], "火": ["9:25","16:00","0:50"], "木": ["9:25","16:00","0:50"], "金": ["9:25","16:00","0:50"], "土": ["8:55","13:25","0:00"] } },
+      { id: "D", name: "Dパターン(佐藤 美穂)", kind: "変則", weeklyNormal: "40:00", remote: "",
+        note: "火・日は分院",
+        days: { "月": ["9:25","18:00","0:50"], "火": ["8:45","18:30","1:00","分院"], "木": ["9:25","17:00","0:50"], "金": ["9:25","18:00","0:50"], "日": ["8:30","18:30","1:00","分院"] } },
+      { id: "E", name: "Eパターン(齊木 季子)", kind: "変則", weeklyNormal: "21:30", remote: "",
+        note: "社保加入パート",
+        days: { "火": ["9:25","18:00","0:50"], "木": ["14:15","18:00","0:00"], "日": ["9:25","20:30","1:05"] } },
+      { id: "F", name: "Fパターン(山下(永友)奈々子)", kind: "変則", weeklyNormal: "35:00", remote: "",
+        days: { "火": ["9:25","18:00","0:50"], "水": ["9:25","18:00","0:50"], "木": ["9:25","18:00","0:50"], "金": ["9:25","13:25","0:00"], "日": ["9:25","18:00","0:50"] } },
+      { id: "G", name: "Gパターン(杉原(熊谷)朋実)", kind: "変則", weeklyNormal: "35:00", remote: "",
+        note: "本院固定",
+        days: { "月": ["8:30","16:20","0:50"], "火": ["8:30","16:20","0:50"], "木": ["8:30","16:20","0:50"], "金": ["8:30","16:20","0:50"], "土": ["8:00","15:50","0:50"] } },
+    ],
+    assignments: {
+      "志賀 愛": "A", "田中 歩美": "B", "相原 南美": "C", "佐藤 美穂": "D",
+      "齊木 季子": "E", "山下 奈々子": "F", "杉原 朋実": "G",
+    },
+  };
+}
+
+function renderWorkPatternSheet_(obj) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(WORK_PATTERNS_SHEET);
+  if (!ws) ws = ss.insertSheet(WORK_PATTERNS_SHEET);
+  ws.clearContents();
+  const WD = ["日", "月", "火", "水", "木", "金", "土"];
+  const COLS = 11;
+  const rows = [["パターンID", "パターン名", "区分", "週通常時間", "リモート", "曜日", "開始", "終了", "休憩", "勤務地", "備考"]];
+  (obj.patterns || []).forEach(p => {
+    let wrote = false;
+    WD.forEach(d => {
+      const e = (p.days || {})[d];
+      if (!e) return;
+      rows.push([p.id || "", p.name || "", p.kind || "", p.weeklyNormal || "", p.remote || "",
+                 d, e[0] || "", e[1] || "", e[2] || "", e[3] || "", p.note || ""]);
+      wrote = true;
+    });
+    if (!wrote) rows.push([p.id || "", p.name || "", p.kind || "", p.weeklyNormal || "", p.remote || "", "", "", "", "", "", p.note || ""]);
+  });
+  rows.push([]);
+  rows.push(["■ スタッフ割当 (スタッフ名 → パターンID。未割当は本院標準)"]);
+  rows.push(["スタッフ名", "パターンID"]);
+  Object.keys(obj.assignments || {}).forEach(s => rows.push([s, obj.assignments[s]]));
+  const norm = rows.map(r => { const a = r.slice(); while (a.length < COLS) a.push(""); return a; });
+  ws.getRange(1, 1, norm.length, COLS).setValues(norm);
+  ws.setFrozenRows(1);
 }

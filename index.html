@@ -418,6 +418,24 @@
 .ft-yes { color:#1e88e5; font-weight:bold; }
 .ft-no  { color:#bbb; }
 
+/* ===== 勤務形態マスタ ===== */
+.wp-card { border:1px solid #ddd; border-radius:8px; padding:10px 12px; margin-bottom:12px; background:#fafafa; }
+.wp-card.std { background:#eef4ff; border-color:#bcd2f5; }
+.wp-card .wp-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
+.wp-card .wp-head input { padding:4px 6px; font-size:13px; border:1px solid #ccc; border-radius:4px; }
+.wp-card .wp-id { width:60px; font-weight:bold; }
+.wp-card .wp-name { width:240px; }
+.wp-card .wp-meta { display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:12px; color:#555; margin-bottom:6px; }
+.wp-card .wp-meta input { padding:3px 5px; border:1px solid #ccc; border-radius:4px; }
+.wp-days { width:100%; border-collapse:collapse; font-size:12px; }
+.wp-days th, .wp-days td { border:1px solid #e2e2e2; padding:2px 4px; text-align:center; }
+.wp-days th { background:#f0f0f0; }
+.wp-days input { width:62px; padding:2px 3px; border:1px solid #ccc; border-radius:3px; text-align:center; font-size:12px; }
+.wp-days input.loc { width:48px; }
+.wp-days td.wsum { font-weight:bold; color:#1565c0; }
+.wp-del { border:1px solid #e57373; color:#c62828; background:#fff; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:12px; }
+#wp-assign td select { padding:2px 4px; font-size:12px; }
+
 /* ヘッダリンク */
 .header-links {
   margin-top: 8px;
@@ -462,6 +480,7 @@
   <button data-view="weekend-agg">土日出勤集計</button>
   <button data-view="weekday-pattern">曜日別出勤パターン</button>
   <button data-view="shift">常勤シフト表</button>
+  <button data-view="patterns">勤務形態マスタ</button>
 </nav>
 
 <main>
@@ -746,6 +765,34 @@
         <summary style="cursor:pointer;color:#555">常勤判定の根拠(全スタッフの週平均勤務時間)</summary>
         <div class="table-wrap" style="margin-top:8px"><table id="tbl-shift-ft" class="ft-table"></table></div>
       </details>
+    </div>
+  </section>
+
+  <!-- ============ 勤務形態マスタ ============ -->
+  <section class="view" id="view-patterns">
+    <div class="panel">
+      <h2>勤務形態マスタ ― 定時・変則パターン(A〜G)とスタッフ割当</h2>
+      <p class="muted"><span id="wp-loading"></span></p>
+      <p class="muted" style="color:#888">
+        「定時(本院/分院/移動)」を基準に、変則勤務のスタッフは A〜G などのパターンを定義します。
+        各スタッフにパターンを割り当てて管理します。<b>変更は「保存」で全端末に反映</b>され、
+        スプレッドシートの「勤務形態マスタ」シートにも出力されます。
+      </p>
+      <div class="toolbar" style="margin:8px 0">
+        <button class="btn" id="wp-save">保存(全端末へ反映)</button>
+        <button class="btn ghost" id="wp-add">＋ 変則パターンを追加</button>
+        <span id="wp-status" class="muted"></span>
+      </div>
+
+      <h3 style="margin:14px 0 6px">パターン定義</h3>
+      <div id="wp-patterns"></div>
+
+      <h3 style="margin:18px 0 6px">スタッフ割当</h3>
+      <p class="muted" style="margin-top:0">
+        各スタッフのパターンを選択(未選択=本院標準)。
+        <input type="search" id="wp-staff-search" placeholder="氏名で絞り込み" style="margin-left:8px">
+      </p>
+      <div class="table-wrap"><table id="wp-assign"></table></div>
     </div>
   </section>
 
@@ -1818,6 +1865,20 @@ function callApi(action, params) {
       if (data.error) throw new Error(data.error);
       return data;
     });
+}
+
+// 大きな payload の保存用 POST (text/plain でプリフライト回避)
+function callApiPost(action, bodyObj) {
+  const url = new URL(APPS_SCRIPT_URL);
+  url.searchParams.set("action", action);
+  return fetch(url.toString(), {
+    method: "POST",
+    redirect: "follow",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(bodyObj),
+  })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(data => { if (data.error) throw new Error(data.error); return data; });
 }
 
 // 託児/休暇データを Apps Script API 経由で取得して STATE に取り込む (CORS回避)
@@ -2895,6 +2956,201 @@ function renderShift() {
 
 
 /* ============================================================
+ * 勤務形態マスタ (定時 + 変則パターン + スタッフ割当)
+ * ============================================================ */
+const WP_WD = ["日", "月", "火", "水", "木", "金", "土"];
+let _wpData = null;       // { patterns:[...], assignments:{name:id} }
+let _wpStaff = null;      // staff_list (氏名 (コード))
+let _wpLoaded = false;
+
+function wpStripName(s) { return String(s || "").replace(/\s*[\(（].*$/, "").trim(); }
+function wpToMin(s) {
+  const m = String(s || "").match(/(\d{1,2}):(\d{2})/);
+  return m ? (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) : null;
+}
+function wpFmtMin(min) {
+  if (min == null || isNaN(min)) return "";
+  const h = Math.floor(min / 60), m = min % 60;
+  return h + ":" + String(m).padStart(2, "0");
+}
+
+function loadPatterns() {
+  if (_wpLoaded) { return; }
+  const loading = document.getElementById("wp-loading");
+  if (loading) loading.textContent = "読み込み中...";
+  Promise.all([
+    callApi("work_patterns").then(d => d.data).catch(() => null),
+    callApi("staff_list").then(d => d.staff || []).catch(() => []),
+  ]).then(([data, staff]) => {
+    _wpData = (data && Array.isArray(data.patterns)) ? data : { patterns: [], assignments: {} };
+    if (!_wpData.assignments) _wpData.assignments = {};
+    _wpStaff = staff;
+    _wpLoaded = true;
+    if (loading) loading.textContent = "";
+    renderPatternCards();
+    renderAssign();
+    wireWpOnce();
+  }).catch(err => {
+    if (loading) loading.textContent = "エラー: " + err.message;
+  });
+}
+
+function wpDayRow(wd, e) {
+  e = e || [];
+  return '<tr data-wd="' + wd + '">' +
+    '<td>' + wd + '</td>' +
+    '<td><input class="d-in" value="' + escapeHtml(e[0] || "") + '" placeholder="—"></td>' +
+    '<td><input class="d-out" value="' + escapeHtml(e[1] || "") + '" placeholder="—"></td>' +
+    '<td><input class="d-brk" value="' + escapeHtml(e[2] || "") + '" placeholder="0:00"></td>' +
+    '<td><input class="loc d-loc" value="' + escapeHtml(e[3] || "") + '" placeholder=""></td>' +
+    '<td class="wsum d-sum"></td>' +
+    '</tr>';
+}
+
+function renderPatternCards() {
+  const box = document.getElementById("wp-patterns");
+  if (!box) return;
+  box.innerHTML = "";
+  (_wpData.patterns || []).forEach(p => box.appendChild(buildPatternCard(p)));
+  box.querySelectorAll(".wp-card").forEach(updateCardSums);
+}
+
+function buildPatternCard(p) {
+  const std = (p.kind === "標準");
+  const div = document.createElement("div");
+  div.className = "wp-card" + (std ? " std" : "");
+  let daysHtml = "<table class='wp-days'><thead><tr><th>曜日</th><th>開始</th><th>終了</th><th>休憩</th><th>勤務地</th><th>勤務</th></tr></thead><tbody>";
+  WP_WD.forEach(wd => { daysHtml += wpDayRow(wd, (p.days || {})[wd]); });
+  daysHtml += "</tbody></table>";
+  div.innerHTML =
+    '<div class="wp-head">' +
+      'ID <input class="wp-id" value="' + escapeHtml(p.id || "") + '">' +
+      '名称 <input class="wp-name" value="' + escapeHtml(p.name || "") + '">' +
+      '区分 <select class="wp-kind"><option value="変則"' + (std ? "" : " selected") + '>変則</option>' +
+             '<option value="標準"' + (std ? " selected" : "") + '>標準</option></select>' +
+      '<span class="spacer" style="flex:1"></span>' +
+      '<button type="button" class="wp-del">削除</button>' +
+    '</div>' +
+    '<div class="wp-meta">' +
+      '週通常 <input class="wp-wn" style="width:64px" value="' + escapeHtml(p.weeklyNormal || "") + '" placeholder="35:00">' +
+      'リモート <input class="wp-remote" style="width:64px" value="' + escapeHtml(p.remote || "") + '" placeholder="">' +
+      '備考 <input class="wp-note" style="width:300px" value="' + escapeHtml(p.note || "") + '">' +
+      '<span class="wp-weektotal" style="margin-left:8px;color:#1565c0"></span>' +
+    '</div>' + daysHtml;
+
+  div.querySelector(".wp-del").addEventListener("click", () => {
+    if (confirm("このパターンを削除しますか? (保存するまで確定しません)")) div.remove();
+  });
+  div.querySelectorAll(".d-in,.d-out,.d-brk").forEach(inp =>
+    inp.addEventListener("input", () => updateCardSums(div)));
+  return div;
+}
+
+function updateCardSums(card) {
+  let total = 0;
+  card.querySelectorAll(".wp-days tbody tr").forEach(tr => {
+    const i = wpToMin(tr.querySelector(".d-in").value);
+    const o = wpToMin(tr.querySelector(".d-out").value);
+    const b = wpToMin(tr.querySelector(".d-brk").value) || 0;
+    const cell = tr.querySelector(".d-sum");
+    if (i != null && o != null && o > i) { const w = o - i - b; total += w; cell.textContent = wpFmtMin(w); }
+    else cell.textContent = "";
+  });
+  const wt = card.querySelector(".wp-weektotal");
+  if (wt) wt.textContent = "週出勤計 " + wpFmtMin(total);
+}
+
+function renderAssign() {
+  const tbl = document.getElementById("wp-assign");
+  if (!tbl) return;
+  const filter = (document.getElementById("wp-staff-search") || {}).value || "";
+  const opts = ['<option value="">(本院標準)</option>']
+    .concat((_wpData.patterns || []).map(p =>
+      '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.id + " : " + (p.name || "")) + '</option>')).join("");
+  let html = "<thead><tr><th>スタッフ</th><th>パターン</th></tr></thead><tbody>";
+  (_wpStaff || []).forEach(label => {
+    if (filter && label.indexOf(filter) < 0) return;
+    const key = wpStripName(label);
+    const cur = _wpData.assignments[key] || "";
+    const sel = '<select data-key="' + escapeHtml(key) + '">' +
+      opts.replace('value="' + escapeHtml(cur) + '"', 'value="' + escapeHtml(cur) + '" selected') + '</select>';
+    html += "<tr><td>" + escapeHtml(label) + "</td><td>" + sel + "</td></tr>";
+  });
+  html += "</tbody>";
+  tbl.innerHTML = html;
+}
+
+function collectWpData() {
+  const patterns = [];
+  document.querySelectorAll("#wp-patterns .wp-card").forEach(card => {
+    const id = card.querySelector(".wp-id").value.trim();
+    if (!id) return;
+    const days = {};
+    card.querySelectorAll(".wp-days tbody tr").forEach(tr => {
+      const wd = tr.getAttribute("data-wd");
+      const i = tr.querySelector(".d-in").value.trim();
+      const o = tr.querySelector(".d-out").value.trim();
+      const b = tr.querySelector(".d-brk").value.trim();
+      const loc = tr.querySelector(".d-loc").value.trim();
+      if (i && o) { const arr = [i, o, b || "0:00"]; if (loc) arr.push(loc); days[wd] = arr; }
+    });
+    patterns.push({
+      id: id,
+      name: card.querySelector(".wp-name").value.trim(),
+      kind: card.querySelector(".wp-kind").value,
+      weeklyNormal: card.querySelector(".wp-wn").value.trim(),
+      remote: card.querySelector(".wp-remote").value.trim(),
+      note: card.querySelector(".wp-note").value.trim(),
+      days: days,
+    });
+  });
+  const assignments = {};
+  document.querySelectorAll("#wp-assign select").forEach(sel => {
+    if (sel.value) assignments[sel.getAttribute("data-key")] = sel.value;
+  });
+  return { patterns: patterns, assignments: assignments };
+}
+
+function savePatterns() {
+  const status = document.getElementById("wp-status");
+  const obj = collectWpData();
+  // ID重複チェック
+  const ids = obj.patterns.map(p => p.id);
+  const dup = ids.find((x, i) => ids.indexOf(x) !== i);
+  if (dup) { if (status) { status.textContent = "⚠️ パターンIDが重複: " + dup; status.style.color = "#c62828"; } return; }
+  if (status) { status.textContent = "保存中..."; status.style.color = "#555"; }
+  callApiPost("set_work_patterns", obj)
+    .then(() => {
+      _wpData = obj;
+      if (status) { status.textContent = "✓ 保存しました(全端末に反映)"; status.style.color = "#2e7d32"; }
+      renderAssign(); // optionsを最新パターンで更新
+    })
+    .catch(err => { if (status) { status.textContent = "保存失敗: " + err.message; status.style.color = "#c62828"; } });
+}
+
+function addPattern() {
+  const box = document.getElementById("wp-patterns");
+  if (!box) return;
+  const card = buildPatternCard({ id: "", name: "", kind: "変則", days: {} });
+  box.appendChild(card);
+  updateCardSums(card);
+  card.querySelector(".wp-id").focus();
+}
+
+let _wpWired = false;
+function wireWpOnce() {
+  if (_wpWired) return;
+  _wpWired = true;
+  const save = document.getElementById("wp-save");
+  if (save) save.addEventListener("click", savePatterns);
+  const add = document.getElementById("wp-add");
+  if (add) add.addEventListener("click", addPattern);
+  const search = document.getElementById("wp-staff-search");
+  if (search) search.addEventListener("input", renderAssign);
+}
+
+
+/* ============================================================
  * イベント結合
  * ============================================================ */
 
@@ -2917,6 +3173,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const shiftBtn = document.querySelector('#tabs button[data-view="shift"]');
   if (shiftBtn) shiftBtn.addEventListener("click", loadShift);
+
+  const patternsBtn = document.querySelector('#tabs button[data-view="patterns"]');
+  if (patternsBtn) patternsBtn.addEventListener("click", loadPatterns);
 
   // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 
