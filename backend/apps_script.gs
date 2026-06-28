@@ -44,7 +44,7 @@ const SPECIAL_THRESHOLD_SECONDS = 3 * 3600;
 const EXCLUDED_TABS = [
   "勤務データログ", "出勤簿ログ", "集計", "シート1", "Sheet1",
   "ふりがな", "休暇申請フォーム", "フォームの回答 1", "フォームの回答1",
-  "勤務形態マスタ",
+  "勤務形態マスタ", "日次備考",
 ];
 
 
@@ -79,6 +79,12 @@ function doGet(e) {
         break;
       case "seed_work_patterns":
         result = { data: seedWorkPatterns() };
+        break;
+      case "day_notes":
+        result = getDayNotes(e.parameter.name || "");
+        break;
+      case "set_day_note":
+        result = setDayNote(e.parameter.name || "", e.parameter.ymd || "", e.parameter.text || "");
         break;
       case "ping":
         result = { ok: true, time: new Date().toISOString() };
@@ -736,6 +742,52 @@ function defaultWorkPatterns_() {
     },
   };
 }
+
+/* ============================================================
+ * 日次備考 (個人別勤務記録の各日メモ・事務局が集計時に使用)
+ *   シート「日次備考」に スタッフ / 年月日 / 備考 / 更新日時 で保存。
+ *   個人別タブから取得(day_notes)・更新(set_day_note)。
+ * ============================================================ */
+const DAY_NOTES_SHEET = "日次備考";
+
+function getDayNotes(name) {
+  const notes = {};
+  if (!name) return { notes: notes };
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ws = ss.getSheetByName(DAY_NOTES_SHEET);
+  if (ws && ws.getLastRow() >= 2) {
+    const v = ws.getRange(1, 1, ws.getLastRow(), 3).getValues();
+    for (let i = 1; i < v.length; i++) {
+      if (String(v[i][0]) === name) notes[String(v[i][1])] = String(v[i][2] || "");
+    }
+  }
+  return { notes: notes };
+}
+
+function setDayNote(name, ymd, text) {
+  if (!name || !ymd) throw new Error("name と ymd は必須です");
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(DAY_NOTES_SHEET);
+  if (!ws) {
+    ws = ss.insertSheet(DAY_NOTES_SHEET);
+    ws.getRange(1, 1, 1, 4).setValues([["スタッフ", "年月日", "備考", "更新日時"]]);
+    ws.setFrozenRows(1);
+  }
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const last = ws.getLastRow();
+  if (last >= 2) {
+    const v = ws.getRange(1, 1, last, 2).getValues();
+    for (let i = 1; i < v.length; i++) {
+      if (String(v[i][0]) === name && String(v[i][1]) === ymd) {
+        ws.getRange(i + 1, 3, 1, 2).setValues([[text, stamp]]);
+        return { ok: true };
+      }
+    }
+  }
+  ws.appendRow([name, ymd, text, stamp]);
+  return { ok: true };
+}
+
 
 function renderWorkPatternSheet_(obj) {
   const ss = SpreadsheetApp.openById(SHEET_ID);

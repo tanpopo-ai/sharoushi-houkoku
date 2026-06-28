@@ -353,6 +353,15 @@
 /* 休暇セル */
 .leave-cell { background:#ede7f6; color:#5e35b1; font-weight:bold; }
 
+/* 打刻漏れ */
+.punch-missing { background:#ffebee; color:#c62828; font-weight:bold; text-align:center; white-space:nowrap; }
+.punch-missing::before { content:"⚠ "; }
+/* 個人別 備考入力 */
+.note-input { width:100%; min-width:120px; box-sizing:border-box; padding:2px 4px; border:1px solid #ccc; border-radius:3px; font-size:12px; }
+.note-input.saving { background:#fffde7; }
+.note-input.saved { background:#e8f5e9; }
+.note-input.save-error { background:#ffebee; border-color:#e57373; }
+
 /* 年タブ / 月タブ */
 .year-tabs, .month-tabs {
   display: flex;
@@ -1881,6 +1890,15 @@ function callApiPost(action, bodyObj) {
     .then(data => { if (data.error) throw new Error(data.error); return data; });
 }
 
+// 日次備考: 指定スタッフ(コード付きタブ名)の備考を取得 { "2026/06/01": "..." }
+function loadDayNotes(name) {
+  return callApi("day_notes", { name: name }).then(d => d.notes || {}).catch(() => ({}));
+}
+// 日次備考: 1日分を保存
+function saveDayNote(name, ymd, text) {
+  return callApi("set_day_note", { name: name, ymd: ymd, text: text });
+}
+
 // 託児/休暇データを Apps Script API 経由で取得して STATE に取り込む (CORS回避)
 function loadFormDataViaApi() {
   return callApi("formdata").then(data => {
@@ -2035,6 +2053,8 @@ let _indivCurrentYear = null;
 let _indivCurrentMonth = null;
 let _indivColIdx = null;  // 列インデックスのキャッシュ
 let _indivStaffName = ""; // 選択中スタッフの氏名 (コード抜き、託児データ突合用)
+let _indivStaffFull = ""; // 選択中スタッフのタブ名 (コード付き・備考保存キー)
+let _indivNotes = {};     // { "2026/06/01": "備考テキスト" }
 
 // 氏名の正規化 (空白除去) — 託児フォームと勤怠で表記揺れがあっても突合できるように
 function normNameForMatch(s) {
@@ -2103,6 +2123,15 @@ function renderIndivData(data) {
 
   // 選択中スタッフ名 (コード抜き) を保持
   _indivStaffName = String(data.name || "").replace(/\s*[\(（].*$/, "").trim();
+  // 備考保存用にフルのタブ名(コード付き)も保持し、当該スタッフの備考を読み込む
+  _indivStaffFull = String(data.name || "");
+  _indivNotes = {};
+  if (typeof loadDayNotes === "function") {
+    loadDayNotes(_indivStaffFull).then(n => {
+      _indivNotes = n || {};
+      if (_indivGrouped) renderCombinedTable();
+    });
+  }
 
   // 列インデックスを検出 (見出しは改行を含む可能性があるため部分一致)
   _indivColIdx = {
@@ -2115,6 +2144,7 @@ function renderIndivData(data) {
     loc: findColumn(header, h => h.indexOf("判定勤務地") >= 0),
     over: findColumn(header, h => h === "残業時間"),
     spec: findColumn(header, h => h === "特出時間"),
+    status: findColumn(header, h => h.indexOf("勤怠状況") >= 0),
   };
 
   // 年・月でグループ化
@@ -2242,9 +2272,9 @@ function renderCombinedTable() {
   const year = parseInt(_indivCurrentYear, 10);
 
   // 統合表:
-  //  0日付 1休日区分 2出勤時刻 3退勤時刻 4実労働時間 5出勤場所 6休暇 7残業時間 8特出時間 9託児利用時間
+  //  0日付 1休日区分 2出勤 3退勤 4実労働 5打刻 6出勤場所 7休暇 8残業 9特出 10託児 11備考
   const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間",
-                   "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間"];
+                   "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考"];
   let careMonthTotal = 0;
 
   // 変則パターンのスタッフは、残業/特出をパターン(所定)基準で再計算する
@@ -2252,19 +2282,35 @@ function renderCombinedTable() {
   const variant = !!(pat && pat.kind === "変則");
   let vOverTotal = 0, vSpecTotal = 0;  // 変則: 再計算の月合計(分)
 
+  const _today = new Date(); _today.setHours(0, 0, 0, 0);
+  const rowKeys = [];  // 各行の年月日キー (備考入力用。合計/不正行は null)
+
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
     let careStr = "";
     let leaveStr = "";
     let overStr = r[idx.over] || "";
     let specStr = r[idx.spec] || "";
+    let punchStr = "";
+    let ymd = null;
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
       const dd = parseInt(dm[2], 10);
+      ymd = year + "/" + pad2(mm) + "/" + pad2(dd);
       const h = careHoursFor(year, mm, dd);
       if (h > 0) { careStr = hoursToHHMM(h); careMonthTotal += h; }
       leaveStr = leaveForDate(year, mm, dd);
+
+      // 打刻漏れ検知: 出勤/退勤の片方のみ打刻、または勤怠状況に打刻漏れ表示
+      const hasIn = (idx.in >= 0) && (parseTime(r[idx.in]) > 0);
+      const hasOut = (idx.out >= 0) && (parseTime(r[idx.out]) > 0);
+      const statusTxt = (idx.status >= 0) ? String(r[idx.status] || "") : "";
+      const statusFlag = /打刻漏|未打刻|エラー/.test(statusTxt);
+      const onlyOne = (hasIn && !hasOut) || (!hasIn && hasOut);
+      const dayDate = new Date(year, mm - 1, dd);
+      if ((onlyOne || statusFlag) && dayDate <= _today) punchStr = "打刻漏れ";
+
       // 変則: 実労働 − 所定(その曜日のパターン) を残業とし、3時間以上を特出に振り分け
       if (variant) {
         const wd = (dateStr.match(/\((.)\)/) || [])[1];
@@ -2282,45 +2328,69 @@ function renderCombinedTable() {
       careStr = "__MONTH_TOTAL__";
       if (variant) { overStr = "__V_OVER__"; specStr = "__V_SPEC__"; }
     }
+    rowKeys.push(ymd);
     return [
       r[idx.date] || "",
       r[idx.kb] || "",
       r[idx.in] || "",
       r[idx.out] || "",
       r[idx.work] || "",
+      punchStr,
       r[idx.loc] || "",
       leaveStr,
       overStr,
       specStr,
       careStr,
+      "",  // 備考: 後でinput注入
     ];
   });
 
   // 合計行の託児利用時間・変則の残業/特出 月合計を確定
   tableRows.forEach(tr => {
-    if (tr[9] === "__MONTH_TOTAL__") {
-      tr[9] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
+    if (tr[10] === "__MONTH_TOTAL__") {
+      tr[10] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
     }
-    if (tr[7] === "__V_OVER__") tr[7] = hoursToHHMM(vOverTotal / 60);
-    if (tr[8] === "__V_SPEC__") tr[8] = hoursToHHMM(vSpecTotal / 60);
+    if (tr[8] === "__V_OVER__") tr[8] = hoursToHHMM(vOverTotal / 60);
+    if (tr[9] === "__V_SPEC__") tr[9] = hoursToHHMM(vSpecTotal / 60);
   });
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
-    // 出勤場所列 (5): 本院/分院/休み の色分け
-    if (col === 5) {
+    // 打刻列 (5): 打刻漏れを赤表示
+    if (col === 5) return val ? "punch-missing" : "";
+    // 出勤場所列 (6): 本院/分院/休み の色分け
+    if (col === 6) {
       if (val === "本院") return "loc-honin";
       if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
-    // 休暇列 (6): 申請があれば色付け
-    if (col === 6) {
-      return val ? "leave-cell" : "";
-    }
-    // 時刻列 (2,3,4,7,8,9) は右寄せ
-    if (col === 2 || col === 3 || col === 4 || col === 7 || col === 8 || col === 9) {
+    // 休暇列 (7): 申請があれば色付け
+    if (col === 7) return val ? "leave-cell" : "";
+    // 時刻列 (2,3,4,8,9,10) は右寄せ
+    if (col === 2 || col === 3 || col === 4 || col === 8 || col === 9 || col === 10) {
       return isNumericCell(val) ? "num" : "";
     }
     return "";
+  });
+
+  // 備考列(最右)に編集可能な入力を注入し、変更時にサーバ保存
+  const tbl = document.getElementById("tbl-combined");
+  const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
+  bodyRows.forEach((tr, i) => {
+    const ymd = rowKeys[i];
+    const cell = tr.cells[11];
+    if (!cell) return;
+    if (!ymd) { cell.textContent = ""; return; }
+    const val = _indivNotes[ymd] || "";
+    cell.innerHTML = '<input class="note-input" data-ymd="' + ymd + '" value="' + escapeHtml(val) + '" placeholder="メモ">';
+    const inp = cell.querySelector("input");
+    inp.addEventListener("change", () => {
+      const text = inp.value;
+      _indivNotes[ymd] = text;
+      inp.classList.add("saving");
+      saveDayNote(_indivStaffFull, ymd, text)
+        .then(() => { inp.classList.remove("saving"); inp.classList.add("saved"); setTimeout(() => inp.classList.remove("saved"), 1200); })
+        .catch(() => { inp.classList.remove("saving"); inp.classList.add("save-error"); });
+    });
   });
 
   // サマリー (託児バッジ / 曜日グリッド / 土日出勤手当) を描画
