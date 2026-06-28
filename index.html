@@ -442,6 +442,8 @@
 .wp-days input { width:62px; padding:2px 3px; border:1px solid #ccc; border-radius:3px; text-align:center; font-size:12px; }
 .wp-days input.loc { width:48px; }
 .wp-days td.wsum { font-weight:bold; color:#1565c0; }
+.wp-save-one { border:1px solid #2563eb; color:#fff; background:#2563eb; border-radius:4px; padding:3px 12px; cursor:pointer; font-size:12px; margin-right:6px; font-weight:bold; }
+.wp-save-one:hover { background:#1d4ed8; }
 .wp-del { border:1px solid #e57373; color:#c62828; background:#fff; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:12px; }
 #wp-assign td select { padding:2px 4px; font-size:12px; }
 
@@ -679,6 +681,10 @@
       <nav id="indiv-month-tabs" class="month-tabs"></nav>
 
       <p class="indiv-empty" id="indiv-empty-msg">スタッフを選択してください。</p>
+      <div class="toolbar" id="notes-toolbar" style="display:none;margin:6px 0">
+        <button class="btn" id="btn-save-notes">備考を保存</button>
+        <span id="notes-status" class="muted"></span>
+      </div>
       <div class="table-wrap"><table id="tbl-combined"></table></div>
     </div>
   </section>
@@ -1899,6 +1905,36 @@ function saveDayNote(name, ymd, text) {
   return callApi("set_day_note", { name: name, ymd: ymd, text: text });
 }
 
+// 備考: 保存ボタンの表示制御・未保存件数の表示・一括保存
+function updateNotesSaveBtn() {
+  const bar = document.getElementById("notes-toolbar");
+  if (!bar) return;
+  const has = document.querySelectorAll("#tbl-combined .note-input").length > 0;
+  bar.style.display = has ? "" : "none";
+  const st = document.getElementById("notes-status");
+  if (st && !document.querySelectorAll("#tbl-combined .note-input.dirty").length) st.textContent = "";
+}
+function markNotesDirty() {
+  const st = document.getElementById("notes-status");
+  const dirty = document.querySelectorAll("#tbl-combined .note-input.dirty").length;
+  if (st) { st.textContent = dirty ? ("未保存 " + dirty + "件 (「備考を保存」で確定)") : ""; st.style.color = "#e65100"; }
+}
+function saveAllNotes() {
+  const inputs = Array.from(document.querySelectorAll("#tbl-combined .note-input.dirty"));
+  const st = document.getElementById("notes-status");
+  if (!inputs.length) { if (st) { st.textContent = "保存する変更はありません"; st.style.color = "#555"; } return; }
+  if (!_indivStaffFull) return;
+  if (st) { st.textContent = "保存中..."; st.style.color = "#555"; }
+  Promise.all(inputs.map(inp => {
+    const ymd = inp.getAttribute("data-ymd");
+    return saveDayNote(_indivStaffFull, ymd, inp.value)
+      .then(() => { _indivNotes[ymd] = inp.value; inp.classList.remove("dirty"); inp.classList.add("saved"); })
+      .catch(e => { inp.classList.add("save-error"); throw e; });
+  }))
+    .then(() => { if (st) { st.textContent = "✓ 保存しました(全端末に反映)"; st.style.color = "#2e7d32"; } })
+    .catch(() => { if (st) { st.textContent = "一部の保存に失敗しました"; st.style.color = "#c62828"; } });
+}
+
 // 託児/休暇データを Apps Script API 経由で取得して STATE に取り込む (CORS回避)
 function loadFormDataViaApi() {
   return callApi("formdata").then(data => {
@@ -2383,15 +2419,10 @@ function renderCombinedTable() {
     const val = _indivNotes[ymd] || "";
     cell.innerHTML = '<input class="note-input" data-ymd="' + ymd + '" value="' + escapeHtml(val) + '" placeholder="メモ">';
     const inp = cell.querySelector("input");
-    inp.addEventListener("change", () => {
-      const text = inp.value;
-      _indivNotes[ymd] = text;
-      inp.classList.add("saving");
-      saveDayNote(_indivStaffFull, ymd, text)
-        .then(() => { inp.classList.remove("saving"); inp.classList.add("saved"); setTimeout(() => inp.classList.remove("saved"), 1200); })
-        .catch(() => { inp.classList.remove("saving"); inp.classList.add("save-error"); });
-    });
+    // 入力したら「未保存」マーク。保存は「備考を保存」ボタンで明示的に行う
+    inp.addEventListener("input", () => { inp.classList.add("dirty"); inp.classList.remove("saved", "save-error"); markNotesDirty(); });
   });
+  updateNotesSaveBtn();
 
   // サマリー (託児バッジ / 曜日グリッド / 土日出勤手当) を描画
   renderIndivExtras(rows, year, parseInt(_indivCurrentMonth, 10));
@@ -3163,6 +3194,7 @@ function buildPatternCard(p) {
       '区分 <select class="wp-kind"><option value="変則"' + (std ? "" : " selected") + '>変則</option>' +
              '<option value="標準"' + (std ? " selected" : "") + '>標準</option></select>' +
       '<span class="spacer" style="flex:1"></span>' +
+      '<button type="button" class="wp-save-one">保存</button>' +
       '<button type="button" class="wp-del">削除</button>' +
     '</div>' +
     '<div class="wp-meta">' +
@@ -3172,6 +3204,7 @@ function buildPatternCard(p) {
       '<span class="wp-weektotal" style="margin-left:8px;color:#1565c0"></span>' +
     '</div>' + daysHtml;
 
+  div.querySelector(".wp-save-one").addEventListener("click", () => savePatterns());
   div.querySelector(".wp-del").addEventListener("click", () => {
     if (confirm("このパターンを削除しますか? (保存するまで確定しません)")) div.remove();
   });
@@ -3310,6 +3343,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const patternsBtn = document.querySelector('#tabs button[data-view="patterns"]');
   if (patternsBtn) patternsBtn.addEventListener("click", loadPatterns);
+
+  const btnSaveNotes = document.getElementById("btn-save-notes");
+  if (btnSaveNotes) btnSaveNotes.addEventListener("click", saveAllNotes);
 
   // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 
