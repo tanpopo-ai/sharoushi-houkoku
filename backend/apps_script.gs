@@ -756,7 +756,8 @@ function getDayNotes(name) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const ws = ss.getSheetByName(DAY_NOTES_SHEET);
   if (ws && ws.getLastRow() >= 2) {
-    const v = ws.getRange(1, 1, ws.getLastRow(), 3).getValues();
+    // 表示値で読む(年月日はテキスト「2026/06/01」。日付型に変換された旧行とのズレを防ぐ)
+    const v = ws.getRange(1, 1, ws.getLastRow(), 3).getDisplayValues();
     for (let i = 1; i < v.length; i++) {
       if (String(v[i][0]) === name) notes[String(v[i][1])] = String(v[i][2] || "");
     }
@@ -776,7 +777,7 @@ function setDayNote(name, ymd, text) {
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   const last = ws.getLastRow();
   if (last >= 2) {
-    const v = ws.getRange(1, 1, last, 2).getValues();
+    const v = ws.getRange(1, 1, last, 2).getDisplayValues();
     for (let i = 1; i < v.length; i++) {
       if (String(v[i][0]) === name && String(v[i][1]) === ymd) {
         ws.getRange(i + 1, 3, 1, 2).setValues([[text, stamp]]);
@@ -784,7 +785,12 @@ function setDayNote(name, ymd, text) {
       }
     }
   }
-  ws.appendRow([name, ymd, text, stamp]);
+  // 新規行: 年月日セルはテキスト書式で書き込む(「2026/06/01」の日付自動変換を防ぐ)
+  const r = last + 1;
+  ws.getRange(r, 1).setValue(name);
+  ws.getRange(r, 2).setNumberFormat("@").setValue(ymd);
+  ws.getRange(r, 3).setValue(text);
+  ws.getRange(r, 4).setValue(stamp);
   return { ok: true };
 }
 
