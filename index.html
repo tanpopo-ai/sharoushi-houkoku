@@ -2347,24 +2347,22 @@ function renderCombinedTable() {
       const dayDate = new Date(year, mm - 1, dd);
       if ((onlyOne || statusFlag) && dayDate <= _today) punchStr = "打刻漏れ";
 
-      // 変則: 実労働 − 所定(その曜日のパターン) を残業とし、3時間以上を特出に振り分け
-      // ※ 定時開始より早く出勤した分(早出)は残業に含めない
+      // 変則: 残業 = 「定時終了より後に退勤した分(退勤 − パターン終了)」で算出し、3時間以上を特出へ。
+      //   ・パターンの時刻を優先(早出は含めない=退勤基準のため自動的に除外)
+      //   ・休憩はパターン基準。ジョブカンの休憩は使わないため二重控除(ダブルカウント)しない
       if (variant) {
         const wd = (dateStr.match(/\((.)\)/) || [])[1];
         const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
         if (wd && actualMin > 0) {
           const dayDef = (pat.days || {})[wd];          // [開始, 終了, 休憩, (勤務地)]
-          const exp = wpDayWorkMin(pat, wd);            // 所定(分)。パターンに無い曜日は null
           let otMin;
-          if (exp == null) {
+          if (!dayDef) {
             otMin = actualMin;                          // 所定の無い曜日に出勤 → 全て残業/特出
           } else {
-            // 早出控除: 出勤時刻が定時開始より早ければ、その差分は残業に含めない
-            const schedStart = dayDef ? wpToMin(dayDef[0]) : null;
-            const clockIn = wpToMin(r[idx.in]);
-            const earlyMin = (schedStart != null && clockIn != null && clockIn < schedStart)
-              ? (schedStart - clockIn) : 0;
-            otMin = Math.max(0, actualMin - exp - earlyMin);
+            const schedEnd = wpToMin(dayDef[1]);        // パターンの終了時刻
+            const clockOut = wpToMin(r[idx.out]);       // 実退勤時刻
+            otMin = (schedEnd != null && clockOut != null && clockOut > schedEnd)
+              ? (clockOut - schedEnd) : 0;
           }
           if (otMin >= 180) { specStr = hoursToHHMM(otMin / 60); overStr = "0:00"; vSpecTotal += otMin; }
           else { overStr = hoursToHHMM(otMin / 60); specStr = "0:00"; vOverTotal += otMin; }
