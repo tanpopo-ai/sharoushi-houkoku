@@ -2173,6 +2173,11 @@ function renderIndivData(data) {
   renderYearTabs();
   renderMonthTabs();
   renderCombinedTable();
+
+  // 勤務形態データを読み込めたら(勤務形態バッジ・変則の残業/特出再計算のため)再描画
+  if (typeof loadWpData === "function") {
+    loadWpData().then(() => { if (_indivGrouped) renderCombinedTable(); });
+  }
 }
 
 function renderYearTabs() {
@@ -2242,10 +2247,17 @@ function renderCombinedTable() {
                    "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間"];
   let careMonthTotal = 0;
 
+  // 変則パターンのスタッフは、残業/特出をパターン(所定)基準で再計算する
+  const pat = (typeof wpPatternForStaff === "function") ? wpPatternForStaff(_indivStaffName) : null;
+  const variant = !!(pat && pat.kind === "変則");
+  let vOverTotal = 0, vSpecTotal = 0;  // 変則: 再計算の月合計(分)
+
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
     let careStr = "";
     let leaveStr = "";
+    let overStr = r[idx.over] || "";
+    let specStr = r[idx.spec] || "";
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
@@ -2253,8 +2265,22 @@ function renderCombinedTable() {
       const h = careHoursFor(year, mm, dd);
       if (h > 0) { careStr = hoursToHHMM(h); careMonthTotal += h; }
       leaveStr = leaveForDate(year, mm, dd);
+      // 変則: 実労働 − 所定(その曜日のパターン) を残業とし、3時間以上を特出に振り分け
+      if (variant) {
+        const wd = (dateStr.match(/\((.)\)/) || [])[1];
+        const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
+        if (wd && actualMin > 0) {
+          const exp = wpDayWorkMin(pat, wd);            // 所定(分)。パターンに無い曜日は null=0扱い
+          const otMin = Math.max(0, actualMin - (exp || 0));
+          if (otMin >= 180) { specStr = hoursToHHMM(otMin / 60); overStr = "0:00"; vSpecTotal += otMin; }
+          else { overStr = hoursToHHMM(otMin / 60); specStr = "0:00"; vOverTotal += otMin; }
+        } else {
+          overStr = "0:00"; specStr = "0:00";
+        }
+      }
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
+      if (variant) { overStr = "__V_OVER__"; specStr = "__V_SPEC__"; }
     }
     return [
       r[idx.date] || "",
@@ -2264,17 +2290,19 @@ function renderCombinedTable() {
       r[idx.work] || "",
       r[idx.loc] || "",
       leaveStr,
-      r[idx.over] || "",
-      r[idx.spec] || "",
+      overStr,
+      specStr,
       careStr,
     ];
   });
 
-  // 合計行の託児利用時間を月合計で確定
+  // 合計行の託児利用時間・変則の残業/特出 月合計を確定
   tableRows.forEach(tr => {
     if (tr[9] === "__MONTH_TOTAL__") {
       tr[9] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
     }
+    if (tr[7] === "__V_OVER__") tr[7] = hoursToHHMM(vOverTotal / 60);
+    if (tr[8] === "__V_SPEC__") tr[8] = hoursToHHMM(vSpecTotal / 60);
   });
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
@@ -2375,10 +2403,20 @@ function renderIndivExtras(rows, year, month) {
     '<b>' + neitherWeekends + '</b> 回' +
     '</span>';
 
+  // --- 勤務形態バッジ ---
+  const _pat = (typeof wpPatternForStaff === "function") ? wpPatternForStaff(_indivStaffName) : null;
+  const _patLabel = _pat ? (_pat.name || _pat.id) : "標準(本院)";
+  const _patHtml =
+    '<span class="weekend-rest" style="background:#fff3e0;border-color:#ffb74d">' +
+    '<span class="extras-label">勤務形態:</span>' +
+    '<b style="color:#e65100">' + escapeHtml(_patLabel) + '</b>' +
+    (_pat && _pat.kind === "変則" ? ' <span class="muted">(残業/特出はパターン基準で算出)</span>' : '') +
+    '</span>';
+
   const extras = document.getElementById("indiv-extras");
   if (extras) {
     extras.innerHTML =
-      '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml + restHtml;
+      _patHtml + '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml + restHtml;
   }
 
   // --- 託児利用バッジ (名前のすぐ右) ---
@@ -2974,18 +3012,44 @@ function wpFmtMin(min) {
   return h + ":" + String(m).padStart(2, "0");
 }
 
+// 勤務形態データだけ取得 (個人別タブ等で利用。UIは描画しない)
+function loadWpData() {
+  if (_wpData) return Promise.resolve(_wpData);
+  return callApi("work_patterns")
+    .then(d => {
+      _wpData = (d && d.data && Array.isArray(d.data.patterns)) ? d.data : { patterns: [], assignments: {} };
+      if (!_wpData.assignments) _wpData.assignments = {};
+      _wpLoaded = true;
+      return _wpData;
+    })
+    .catch(() => { _wpData = { patterns: [], assignments: {} }; _wpLoaded = true; return _wpData; });
+}
+
+// スタッフ名(コード付き可) → 割当パターン定義 or null
+function wpPatternForStaff(name) {
+  if (!_wpData || !_wpData.assignments) return null;
+  const id = _wpData.assignments[wpStripName(name)];
+  if (!id) return null;
+  return (_wpData.patterns || []).find(p => p.id === id) || null;
+}
+
+// パターンの指定曜日の所定勤務(分)。無ければ null
+function wpDayWorkMin(pat, wd) {
+  const e = pat && pat.days && pat.days[wd];
+  if (!e) return null;
+  const i = wpToMin(e[0]), o = wpToMin(e[1]), b = wpToMin(e[2]) || 0;
+  if (i == null || o == null || o <= i) return null;
+  return o - i - b;
+}
+
 function loadPatterns() {
-  if (_wpLoaded) { return; }
   const loading = document.getElementById("wp-loading");
   if (loading) loading.textContent = "読み込み中...";
   Promise.all([
-    callApi("work_patterns").then(d => d.data).catch(() => null),
-    callApi("staff_list").then(d => d.staff || []).catch(() => []),
+    loadWpData(),
+    (_wpStaff ? Promise.resolve(_wpStaff) : callApi("staff_list").then(d => d.staff || []).catch(() => [])),
   ]).then(([data, staff]) => {
-    _wpData = (data && Array.isArray(data.patterns)) ? data : { patterns: [], assignments: {} };
-    if (!_wpData.assignments) _wpData.assignments = {};
     _wpStaff = staff;
-    _wpLoaded = true;
     if (loading) loading.textContent = "";
     renderPatternCards();
     renderAssign();
