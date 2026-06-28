@@ -2348,12 +2348,24 @@ function renderCombinedTable() {
       if ((onlyOne || statusFlag) && dayDate <= _today) punchStr = "打刻漏れ";
 
       // 変則: 実労働 − 所定(その曜日のパターン) を残業とし、3時間以上を特出に振り分け
+      // ※ 定時開始より早く出勤した分(早出)は残業に含めない
       if (variant) {
         const wd = (dateStr.match(/\((.)\)/) || [])[1];
         const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
         if (wd && actualMin > 0) {
-          const exp = wpDayWorkMin(pat, wd);            // 所定(分)。パターンに無い曜日は null=0扱い
-          const otMin = Math.max(0, actualMin - (exp || 0));
+          const dayDef = (pat.days || {})[wd];          // [開始, 終了, 休憩, (勤務地)]
+          const exp = wpDayWorkMin(pat, wd);            // 所定(分)。パターンに無い曜日は null
+          let otMin;
+          if (exp == null) {
+            otMin = actualMin;                          // 所定の無い曜日に出勤 → 全て残業/特出
+          } else {
+            // 早出控除: 出勤時刻が定時開始より早ければ、その差分は残業に含めない
+            const schedStart = dayDef ? wpToMin(dayDef[0]) : null;
+            const clockIn = wpToMin(r[idx.in]);
+            const earlyMin = (schedStart != null && clockIn != null && clockIn < schedStart)
+              ? (schedStart - clockIn) : 0;
+            otMin = Math.max(0, actualMin - exp - earlyMin);
+          }
           if (otMin >= 180) { specStr = hoursToHHMM(otMin / 60); overStr = "0:00"; vSpecTotal += otMin; }
           else { overStr = hoursToHHMM(otMin / 60); specStr = "0:00"; vOverTotal += otMin; }
         } else {
