@@ -1932,7 +1932,7 @@ function saveAllNotes() {
       .catch(e => { inp.classList.add("save-error"); throw e; });
   }))
     .then(() => { if (st) { st.textContent = "✓ 保存しました(全端末に反映)"; st.style.color = "#2e7d32"; } })
-    .catch(() => { if (st) { st.textContent = "一部の保存に失敗しました"; st.style.color = "#c62828"; } });
+    .catch(e => { if (st) { st.textContent = "保存失敗: " + ((e && e.message) || e) + " (バックエンド未反映の可能性 → node deploy.js)"; st.style.color = "#c62828"; } });
 }
 
 // 託児/休暇データを Apps Script API 経由で取得して STATE に取り込む (CORS回避)
