@@ -353,6 +353,48 @@
 /* 休暇セル */
 .leave-cell { background:#ede7f6; color:#5e35b1; font-weight:bold; }
 
+/* ===== チャットボット ===== */
+#chatbot-fab {
+  position:fixed; right:20px; bottom:20px; z-index:1000;
+  background:#2563eb; color:#fff; border:none; border-radius:24px;
+  padding:12px 18px; font-size:14px; font-weight:bold; cursor:pointer;
+  box-shadow:0 3px 10px rgba(0,0,0,.25);
+}
+#chatbot-fab:hover { background:#1d4ed8; }
+#chatbot-panel {
+  position:fixed; right:20px; bottom:74px; z-index:1000;
+  width:360px; max-width:calc(100vw - 32px); max-height:72vh;
+  background:#fff; border:1px solid #ccc; border-radius:10px;
+  box-shadow:0 8px 30px rgba(0,0,0,.28); display:flex; flex-direction:column; overflow:hidden;
+}
+#chatbot-panel.cb-hidden { display:none; }
+.cb-head { background:#1e3a5f; color:#fff; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; font-weight:bold; }
+.cb-head button { background:none; border:none; color:#fff; font-size:20px; cursor:pointer; line-height:1; }
+.cb-tabs { display:flex; border-bottom:1px solid #eee; }
+.cb-tab { flex:1; background:#f5f5f5; border:none; padding:9px; cursor:pointer; font-size:13px; color:#555; }
+.cb-tab.active { background:#fff; color:#1e3a5f; font-weight:bold; box-shadow:inset 0 -2px 0 #2563eb; }
+.cb-body { padding:12px 14px; overflow-y:auto; }
+.cb-body input[type=search], .cb-body input[type=text], .cb-body select, .cb-body textarea {
+  width:100%; box-sizing:border-box; padding:7px 9px; border:1px solid #ccc; border-radius:6px; font-size:13px; margin-bottom:8px;
+}
+.cb-label { display:block; font-size:12px; color:#555; margin:2px 0 3px; font-weight:bold; }
+#cb-faq-list .cb-q {
+  display:block; width:100%; text-align:left; background:#f3f6fb; border:1px solid #e0e7f2;
+  border-radius:6px; padding:8px 10px; margin-bottom:6px; cursor:pointer; font-size:13px;
+}
+#cb-faq-list .cb-q:hover { background:#e8effb; }
+.cb-answer { background:#f1f8e9; border:1px solid #c5e1a5; border-radius:6px; padding:10px; font-size:13px; white-space:pre-wrap; line-height:1.6; }
+.cb-answer .cb-back { display:inline-block; margin-top:8px; color:#2563eb; cursor:pointer; font-size:12px; }
+@media print { #chatbot-fab, #chatbot-panel { display:none !important; } }
+
+/* 問い合わせ管理 */
+#tbl-inquiries td select { padding:2px 4px; font-size:12px; }
+#tbl-inquiries td .inq-memo { width:100%; box-sizing:border-box; padding:2px 4px; font-size:12px; }
+.inq-st-承認待ち { color:#e65100; font-weight:bold; }
+.inq-st-承認済 { color:#2e7d32; font-weight:bold; }
+.inq-st-却下 { color:#9e9e9e; }
+.inq-st-対応済 { color:#1565c0; font-weight:bold; }
+
 /* 打刻漏れ */
 .punch-missing { background:#ffebee; color:#c62828; font-weight:bold; text-align:center; white-space:nowrap; }
 .punch-missing::before { content:"⚠ "; }
@@ -492,6 +534,7 @@
   <button data-view="weekday-pattern">曜日別出勤パターン</button>
   <button data-view="shift">常勤シフト表</button>
   <button data-view="patterns">勤務形態マスタ</button>
+  <button data-view="inquiries">問い合わせ管理</button>
 </nav>
 
 <main>
@@ -811,7 +854,62 @@
     </div>
   </section>
 
+  <!-- ============ 問い合わせ管理 ============ -->
+  <section class="view" id="view-inquiries">
+    <div class="panel">
+      <h2>問い合わせ管理 ― 不具合連絡・操作質問・要望</h2>
+      <p class="muted">
+        チャットボットに寄せられた投稿の一覧です。<b>承認待ち</b>の項目を確認し、
+        対応すべきものは「承認済」に、不要なものは「却下」に変更してください。
+        <button class="btn ghost" id="inq-reload" style="margin-left:8px">再読み込み</button>
+        <span id="inq-status" class="muted"></span>
+      </p>
+      <p class="muted" style="color:#888">
+        ステータスや管理メモを変更したら各行の「保存」を押してください。
+        「承認済」にした項目は、このチャット(Claude)に「承認分を反映して」と伝えると実装します。
+      </p>
+      <div class="table-wrap"><table id="tbl-inquiries"></table></div>
+    </div>
+  </section>
+
 </main>
+
+<!-- ============ チャットボット (全タブ共通・右下フローティング) ============ -->
+<button id="chatbot-fab" type="button" title="使い方・不具合連絡">💬 ヘルプ</button>
+<div id="chatbot-panel" class="cb-hidden">
+  <div class="cb-head">
+    <span>ヘルプ / 問い合わせ</span>
+    <button type="button" id="chatbot-close" aria-label="閉じる">×</button>
+  </div>
+  <div class="cb-tabs">
+    <button type="button" class="cb-tab active" data-cb="faq">使い方</button>
+    <button type="button" class="cb-tab" data-cb="contact">不具合・要望を送る</button>
+  </div>
+  <div class="cb-body">
+    <!-- 使い方FAQ -->
+    <div id="cb-faq">
+      <input type="search" id="cb-faq-search" placeholder="キーワードで探す (例: 備考, 勤務形態, PDF)">
+      <div id="cb-faq-list"></div>
+      <div id="cb-faq-answer" class="cb-answer" style="display:none"></div>
+    </div>
+    <!-- 問い合わせ送信 -->
+    <div id="cb-contact" style="display:none">
+      <label class="cb-label">種別</label>
+      <select id="cb-type">
+        <option value="不具合">不具合の連絡</option>
+        <option value="操作質問">操作方法の質問</option>
+        <option value="要望">要望・改善依頼</option>
+      </select>
+      <label class="cb-label">内容</label>
+      <textarea id="cb-content" rows="4" placeholder="できるだけ具体的にご記入ください(例: ○○タブの△△が表示されない 等)"></textarea>
+      <label class="cb-label">お名前(任意)</label>
+      <input type="text" id="cb-poster" placeholder="任意">
+      <button type="button" class="btn" id="cb-send">送信する</button>
+      <div id="cb-send-status" class="cb-answer" style="display:none"></div>
+      <p class="muted" style="font-size:11px;margin:6px 0 0">送信内容は管理者に通知され、承認後に対応されます。</p>
+    </div>
+  </div>
+</div>
 
 <footer class="site">
   社労士報告イントラ ／ 社内利用ツール ― データはご利用中のブラウザ内にのみ保存されます。
@@ -3328,6 +3426,155 @@ function wireWpOnce() {
 
 
 /* ============================================================
+ * チャットボット (使い方FAQ + 不具合・要望の投稿)
+ * ============================================================ */
+const CB_FAQ = [
+  { q: "データはどうやって更新されますか?", kw: "更新 データ 取込 自動 最新 反映",
+    a: "勤怠データは毎日自動でジョブカンから取り込まれます(クラウドで実行)。手動操作は不要です。\n最新の取込日時は画面上部の「最終読み込み」で確認できます。古い場合は深夜の取込待ち、または「不具合・要望を送る」からご連絡ください。" },
+  { q: "個人別の勤務記録はどこで見ますか?", kw: "個人 勤務 記録 スタッフ 検索",
+    a: "「個人別勤務」タブを開き、スタッフ名で検索または選択してください。年・月タブで対象月を切り替えられます。" },
+  { q: "備考の入力・保存のしかたは?", kw: "備考 メモ 保存 事務局",
+    a: "「個人別勤務」タブの表の右端「備考」欄に入力し、表の上の「備考を保存」ボタンを押します。\n保存内容は全端末で共有され、スプレッドシートの「日次備考」にも記録されます。" },
+  { q: "打刻漏れはどこに表示されますか?", kw: "打刻 漏れ エラー 出勤 退勤",
+    a: "「個人別勤務」タブの「打刻」列に ⚠ 打刻漏れ と表示されます。出勤・退勤の片方しか打刻が無い日などが対象です(到来済みの日のみ)。" },
+  { q: "勤務形態(パターン)の編集方法は?", kw: "勤務形態 パターン 編集 追加 削除 割当 シフト",
+    a: "「勤務形態マスタ」タブで編集します。各パターンの時刻を直したら、そのカードの「保存」ボタンを押してください。\n変則パターンの追加は「＋変則パターンを追加」、スタッフへの割当は同タブ下部の「スタッフ割当」で行います。" },
+  { q: "変則パターンの残業・特出の出かたは?", kw: "残業 特出 変則 計算 早出 休憩",
+    a: "変則パターンのスタッフは『退勤時刻 − パターンの定時終了時刻』を残業として算出し、3時間以上を特出に振り分けます。\n定時より早い出勤(早出)は残業に含めません。標準スタッフはジョブカンの実残業を使用します。" },
+  { q: "印刷・PDFにしたい", kw: "印刷 PDF 出力",
+    a: "画面上部の「印刷／PDF」ボタンを押してください。対象月・従業員を選んでから実行できます。" },
+  { q: "CSV・Excelで書き出したい", kw: "CSV Excel 書き出し エクスポート 出力",
+    a: "画面上部の「CSV書き出し」「Excel書き出し」ボタンから出力できます。" },
+  { q: "託児費用の計算ルールを知りたい/変えたい", kw: "託児 費用 計算 ルール 休憩 9:30 控除",
+    a: "「託児時間 月次集計」タブの上部に計算ルールが明記されています。「計算ルールを変更する」から数値を編集して保存でき、全端末に反映されます。" },
+  { q: "常勤シフト表とは?", kw: "常勤 シフト 35時間 ガント",
+    a: "「常勤シフト表」タブは、週35時間以上の常勤スタッフについて、曜日ごとの代表的な勤務時間帯を時間軸(ガント)で表示します。" },
+  { q: "不具合や要望を伝えたい", kw: "不具合 要望 連絡 問い合わせ バグ",
+    a: "このウィンドウ上部の「不具合・要望を送る」タブから送信してください。管理者に通知され、承認後に対応されます。" },
+];
+
+let _cbWired = false;
+function openChatbot() {
+  const p = document.getElementById("chatbot-panel");
+  if (p) { p.classList.remove("cb-hidden"); renderCbFaq(""); }
+}
+function closeChatbot() {
+  const p = document.getElementById("chatbot-panel");
+  if (p) p.classList.add("cb-hidden");
+}
+function switchCbTab(which) {
+  document.querySelectorAll(".cb-tab").forEach(b => b.classList.toggle("active", b.dataset.cb === which));
+  document.getElementById("cb-faq").style.display = (which === "faq") ? "" : "none";
+  document.getElementById("cb-contact").style.display = (which === "contact") ? "" : "none";
+}
+function renderCbFaq(filter) {
+  const list = document.getElementById("cb-faq-list");
+  const ans = document.getElementById("cb-faq-answer");
+  if (!list) return;
+  if (ans) ans.style.display = "none";
+  list.style.display = "";
+  const f = (filter || "").trim();
+  const items = CB_FAQ.filter(x => !f || (x.q + " " + x.kw).toLowerCase().indexOf(f.toLowerCase()) >= 0);
+  list.innerHTML = items.length
+    ? items.map(x => '<button type="button" class="cb-q" data-q="' + escapeHtml(x.q) + '">' + escapeHtml(x.q) + "</button>").join("")
+    : '<p class="muted" style="font-size:12px">該当する項目がありません。「不具合・要望を送る」からご質問ください。</p>';
+  list.querySelectorAll(".cb-q").forEach(btn => {
+    btn.addEventListener("click", () => showCbAnswer(btn.dataset.q));
+  });
+}
+function showCbAnswer(q) {
+  const item = CB_FAQ.find(x => x.q === q);
+  if (!item) return;
+  const list = document.getElementById("cb-faq-list");
+  const ans = document.getElementById("cb-faq-answer");
+  if (list) list.style.display = "none";
+  if (ans) {
+    ans.style.display = "";
+    ans.innerHTML = "<b>" + escapeHtml(item.q) + "</b>\n\n" + escapeHtml(item.a) +
+      '\n<span class="cb-back">← 一覧に戻る</span>';
+    const back = ans.querySelector(".cb-back");
+    if (back) back.addEventListener("click", () => renderCbFaq(document.getElementById("cb-faq-search").value));
+  }
+}
+function sendInquiry() {
+  const type = document.getElementById("cb-type").value;
+  const content = document.getElementById("cb-content").value.trim();
+  const poster = document.getElementById("cb-poster").value.trim();
+  const st = document.getElementById("cb-send-status");
+  if (!content) { if (st) { st.style.display = ""; st.textContent = "内容を入力してください。"; st.style.background = "#fff3e0"; } return; }
+  if (st) { st.style.display = ""; st.textContent = "送信中..."; st.style.background = "#f1f8e9"; }
+  callApiPost("add_inquiry", { type: type, content: content, poster: poster })
+    .then(() => {
+      if (st) { st.textContent = "✓ 送信しました。ありがとうございます(管理者に通知されました)。"; st.style.background = "#e8f5e9"; }
+      document.getElementById("cb-content").value = "";
+    })
+    .catch(err => { if (st) { st.textContent = "送信失敗: " + ((err && err.message) || err); st.style.background = "#ffebee"; } });
+}
+function wireChatbot() {
+  if (_cbWired) return;
+  _cbWired = true;
+  const fab = document.getElementById("chatbot-fab");
+  if (fab) fab.addEventListener("click", () => {
+    const p = document.getElementById("chatbot-panel");
+    if (p && p.classList.contains("cb-hidden")) openChatbot(); else closeChatbot();
+  });
+  const close = document.getElementById("chatbot-close");
+  if (close) close.addEventListener("click", closeChatbot);
+  document.querySelectorAll(".cb-tab").forEach(b => b.addEventListener("click", () => switchCbTab(b.dataset.cb)));
+  const search = document.getElementById("cb-faq-search");
+  if (search) search.addEventListener("input", () => renderCbFaq(search.value));
+  const send = document.getElementById("cb-send");
+  if (send) send.addEventListener("click", sendInquiry);
+}
+
+
+/* ============================================================
+ * 問い合わせ管理 (承認/却下/対応済)
+ * ============================================================ */
+const INQ_STATUSES = ["承認待ち", "承認済", "却下", "対応済"];
+function loadInquiries() {
+  const st = document.getElementById("inq-status");
+  if (st) st.textContent = "読み込み中...";
+  callApi("inquiries").then(d => {
+    if (st) st.textContent = "";
+    renderInquiries(d.inquiries || []);
+  }).catch(err => { if (st) st.textContent = "エラー: " + err.message; });
+}
+function renderInquiries(list) {
+  const tbl = document.getElementById("tbl-inquiries");
+  if (!tbl) return;
+  if (!list.length) { tbl.innerHTML = "<tbody><tr><td class='muted'>問い合わせはまだありません。</td></tr></tbody>"; return; }
+  let html = "<thead><tr><th>日時</th><th>種別</th><th>内容</th><th>投稿者</th><th>ステータス</th><th>管理メモ</th><th></th></tr></thead><tbody>";
+  list.forEach(x => {
+    const opts = INQ_STATUSES.map(s => '<option value="' + s + '"' + (s === x.status ? " selected" : "") + ">" + s + "</option>").join("");
+    html += "<tr data-id='" + escapeHtml(x.id) + "'>" +
+      "<td style='white-space:nowrap'>" + escapeHtml(x.date) + "</td>" +
+      "<td>" + escapeHtml(x.type) + "</td>" +
+      "<td style='min-width:240px;white-space:pre-wrap'>" + escapeHtml(x.content) + "</td>" +
+      "<td>" + escapeHtml(x.poster) + "</td>" +
+      "<td><select class='inq-sel inq-st-" + escapeHtml(x.status) + "'>" + opts + "</select></td>" +
+      "<td><input class='inq-memo' value='" + escapeHtml(x.memo || "") + "' placeholder='メモ'></td>" +
+      "<td><button type='button' class='btn sub inq-save'>保存</button></td>" +
+      "</tr>";
+  });
+  html += "</tbody>";
+  tbl.innerHTML = html;
+  tbl.querySelectorAll("tr[data-id]").forEach(tr => {
+    tr.querySelector(".inq-save").addEventListener("click", () => {
+      const id = tr.getAttribute("data-id");
+      const status = tr.querySelector(".inq-sel").value;
+      const memo = tr.querySelector(".inq-memo").value;
+      const btn = tr.querySelector(".inq-save");
+      btn.textContent = "保存中";
+      callApiPost("set_inquiry", { id: id, status: status, memo: memo })
+        .then(() => { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "保存"; }, 1200); })
+        .catch(err => { btn.textContent = "失敗"; alert("保存失敗: " + ((err && err.message) || err)); });
+    });
+  });
+}
+
+
+/* ============================================================
  * イベント結合
  * ============================================================ */
 
@@ -3356,6 +3603,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const btnSaveNotes = document.getElementById("btn-save-notes");
   if (btnSaveNotes) btnSaveNotes.addEventListener("click", saveAllNotes);
+
+  const inqBtn = document.querySelector('#tabs button[data-view="inquiries"]');
+  if (inqBtn) inqBtn.addEventListener("click", loadInquiries);
+  const inqReload = document.getElementById("inq-reload");
+  if (inqReload) inqReload.addEventListener("click", loadInquiries);
+
+  // チャットボット(全タブ共通)を初期化
+  try { wireChatbot(); } catch (e) { console.warn("chatbot init failed:", e); }
 
   // 個人別: 年/月タブのクリックハンドラは renderYearTabs/renderMonthTabs 内で動的に追加
 

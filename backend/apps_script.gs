@@ -44,7 +44,7 @@ const SPECIAL_THRESHOLD_SECONDS = 3 * 3600;
 const EXCLUDED_TABS = [
   "勤務データログ", "出勤簿ログ", "集計", "シート1", "Sheet1",
   "ふりがな", "休暇申請フォーム", "フォームの回答 1", "フォームの回答1",
-  "勤務形態マスタ", "日次備考",
+  "勤務形態マスタ", "日次備考", "問い合わせ",
 ];
 
 
@@ -86,6 +86,9 @@ function doGet(e) {
       case "set_day_note":
         result = setDayNote(e.parameter.name || "", e.parameter.ymd || "", e.parameter.text || "");
         break;
+      case "inquiries":
+        result = getInquiries();
+        break;
       case "ping":
         result = { ok: true, time: new Date().toISOString() };
         break;
@@ -116,6 +119,12 @@ function doPost(e) {
         break;
       case "set_carerules":
         result = setCareRules(body);
+        break;
+      case "add_inquiry":
+        result = addInquiry(body);
+        break;
+      case "set_inquiry":
+        result = setInquiry(body);
         break;
       default:
         throw new Error("Unknown POST action: " + action);
@@ -792,6 +801,82 @@ function setDayNote(name, ymd, text) {
   ws.getRange(r, 3).setValue(text);
   ws.getRange(r, 4).setValue(stamp);
   return { ok: true };
+}
+
+
+/* ============================================================
+ * 問い合わせ (不具合連絡・操作質問・要望) チャットボット投稿
+ *   シート「問い合わせ」に保存し、新規投稿時は管理者へメール通知。
+ *   ステータス: 承認待ち → 承認済 / 却下 / 対応済 (管理タブで変更)。
+ * ============================================================ */
+const INQUIRY_SHEET = "問い合わせ";
+const INQUIRY_ADMIN_EMAIL = "s-fujikado@tanpopo-dc.com";
+const INQUIRY_HEADER = ["ID", "日時", "種別", "内容", "投稿者", "ステータス", "管理メモ"];
+
+function _inquirySheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(INQUIRY_SHEET);
+  if (!ws) {
+    ws = ss.insertSheet(INQUIRY_SHEET);
+    ws.getRange(1, 1, 1, INQUIRY_HEADER.length).setValues([INQUIRY_HEADER]);
+    ws.setFrozenRows(1);
+  }
+  return ws;
+}
+
+function getInquiries() {
+  const ws = _inquirySheet_();
+  const out = [];
+  if (ws.getLastRow() >= 2) {
+    const v = ws.getRange(2, 1, ws.getLastRow() - 1, INQUIRY_HEADER.length).getDisplayValues();
+    v.forEach(r => {
+      if (!String(r[0]).trim()) return;
+      out.push({ id: r[0], date: r[1], type: r[2], content: r[3], poster: r[4], status: r[5], memo: r[6] });
+    });
+  }
+  out.reverse(); // 新しい順
+  return { inquiries: out };
+}
+
+function addInquiry(payload) {
+  const obj = JSON.parse(payload || "{}");
+  const type = String(obj.type || "その他").slice(0, 20);
+  const content = String(obj.content || "").trim();
+  const poster = String(obj.poster || "").slice(0, 50);
+  if (!content) throw new Error("内容が空です");
+  const ws = _inquirySheet_();
+  const id = String(new Date().getTime());
+  const date = new Date().toISOString().slice(0, 16).replace("T", " ");
+  ws.appendRow([id, date, type, content, poster, "承認待ち", ""]);
+  // 管理者へメール通知 (失敗しても投稿は成功扱い)
+  try {
+    MailApp.sendEmail(
+      INQUIRY_ADMIN_EMAIL,
+      "【イントラ問い合わせ】" + type,
+      "種別: " + type + "\n投稿者: " + (poster || "(未記入)") + "\n日時: " + date +
+      "\n\n内容:\n" + content +
+      "\n\n※ イントラの「問い合わせ管理」タブで承認/却下/対応済を設定できます。"
+    );
+  } catch (e) { /* メール失敗は無視 */ }
+  return { ok: true, id: id };
+}
+
+function setInquiry(payload) {
+  const obj = JSON.parse(payload || "{}");
+  const id = String(obj.id || "");
+  if (!id) throw new Error("id がありません");
+  const ws = _inquirySheet_();
+  if (ws.getLastRow() < 2) throw new Error("該当データがありません");
+  const ids = ws.getRange(2, 1, ws.getLastRow() - 1, 1).getDisplayValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === id) {
+      const row = i + 2;
+      if (obj.status != null) ws.getRange(row, 6).setValue(String(obj.status));
+      if (obj.memo != null) ws.getRange(row, 7).setValue(String(obj.memo));
+      return { ok: true };
+    }
+  }
+  throw new Error("ID が見つかりません: " + id);
 }
 
 
