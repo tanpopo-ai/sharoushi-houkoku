@@ -262,6 +262,12 @@
 .loc-honin { background:#ffd6e3; }   /* 本院: ピンク */
 .loc-bunin { background:#cce8ff; }   /* 分院: 水色 */
 .loc-rest  { background:#e0e0e0; color:#666; }  /* 休み: グレー */
+/* 本来の出勤日以外に出勤した日: 行全体を薄い緑色で強調 */
+tr.row-extra > td { background:#d7f0d7; }
+tr.row-extra > td.loc-honin { background:#ffd6e3; }  /* 勤務地セルの色分けは維持 */
+tr.row-extra > td.loc-bunin { background:#cce8ff; }
+tr.row-extra > td.loc-rest  { background:#e0e0e0; }
+tr.row-extra > td.time-flag { background:#fff59d; }  /* 遅刻/早退の強調も維持 */
 
 /* 託児利用バッジ (名前のすぐ右) */
 #indiv-care-badge .care-on {
@@ -2429,10 +2435,31 @@ function renderCombinedTable() {
   const variant = !!(pat && pat.kind === "変則");
   let dispOverMin = 0, dispSpecMin = 0;  // 表示中の残業/特出の月合計(分)
 
+  // 「本来の出勤日以外に出勤している日」を薄い緑色で強調するための準備
+  //   ① 出勤パターンの登録がある人 → 登録曜日(pat.days)以外に出勤した日
+  //   ② 登録が無い人 → 出勤曜日カウントが5番目以降(=不定期)の曜日に出勤した日
+  const hasPattern = !!(pat && pat.days && Object.keys(pat.days).length);
+  let extraWeekdaySet = null;
+  if (!hasPattern) {
+    const wdCnt = {};
+    rows.forEach(r => {
+      const ds = String(r[idx.date] || "");
+      if (ds.indexOf("合計") >= 0) return;
+      const w = (ds.match(/\((.)\)/) || [])[1];
+      if (!w) return;
+      const lc = String(r[idx.loc] || "");
+      if (lc === "本院" || lc === "分院") wdCnt[w] = (wdCnt[w] || 0) + 1;
+    });
+    // 出勤日数の多い曜日順に並べ、5番目以降の曜日を「本来以外」とみなす
+    const ranked = Object.keys(wdCnt).sort((a, b) => wdCnt[b] - wdCnt[a]);
+    extraWeekdaySet = new Set(ranked.slice(4));
+  }
+
   const _today = new Date(); _today.setHours(0, 0, 0, 0);
   const rowKeys = [];   // 各行の年月日キー (備考入力用。合計/不正行は null)
   const rowLate = [];   // 遅刻(出勤セルを強調)
   const rowEarly = [];  // 早退(退勤セルを強調)
+  const rowExtra = [];  // 本来の出勤日以外に出勤(行を薄い緑色で強調)
 
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2442,7 +2469,8 @@ function renderCombinedTable() {
     let specStr = r[idx.spec] || "";
     let punchStr = "";
     let ymd = null;
-    let late = false, early = false;
+    let late = false, early = false, extra = false;
+    let dispLoc = r[idx.loc] || "";   // 出勤場所の表示値(条件により本院→分院に読み替え)
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
@@ -2502,6 +2530,21 @@ function renderCombinedTable() {
         if (schedStart != null && clockIn != null && clockIn > schedStart) late = true;
         if (schedEnd != null && clockOut != null && clockOut < schedEnd) early = true;
       }
+
+      // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら 本院→分院 と表示
+      //   (表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま)
+      if (loc === "本院" && clockIn != null && clockIn <= 510 && clockOut != null && clockOut >= 1170) {
+        dispLoc = "分院";
+      }
+
+      // 本来の出勤日以外に出勤しているか判定
+      if (worked && wd) {
+        if (hasPattern) {
+          if (!(pat.days || {})[wd]) extra = true;              // ① 登録曜日以外に出勤
+        } else if (extraWeekdaySet && extraWeekdaySet.has(wd)) {
+          extra = true;                                          // ② 5番目以降の曜日に出勤
+        }
+      }
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
       overStr = "__TOTAL_OVER__"; specStr = "__TOTAL_SPEC__";
@@ -2509,6 +2552,7 @@ function renderCombinedTable() {
     rowKeys.push(ymd);
     rowLate.push(late);
     rowEarly.push(early);
+    rowExtra.push(extra);
     return [
       r[idx.date] || "",
       r[idx.kb] || "",
@@ -2516,7 +2560,7 @@ function renderCombinedTable() {
       r[idx.out] || "",
       r[idx.work] || "",
       punchStr,
-      r[idx.loc] || "",
+      dispLoc,
       leaveStr,
       overStr,
       specStr,
@@ -2556,6 +2600,8 @@ function renderCombinedTable() {
   const tbl = document.getElementById("tbl-combined");
   const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
   bodyRows.forEach((tr, i) => {
+    // 本来の出勤日以外に出勤 → 行を薄い緑色で強調
+    if (rowExtra[i]) tr.classList.add("row-extra");
     // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
     if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
     if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
