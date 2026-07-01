@@ -426,6 +426,11 @@ td.saving { opacity:0.5; }
   background:#e3f2fd; color:#1565c0; font-size:12px; font-weight:bold; border:1px solid #90caf9;
 }
 #indiv-days-badge:empty { display:none; }
+#indiv-ot-badge {
+  display:inline-block; margin:0 6px; padding:2px 10px; border-radius:12px;
+  background:#fff3e0; color:#e65100; font-size:12px; font-weight:bold; border:1px solid #ffb74d;
+}
+#indiv-ot-badge:empty { display:none; }
 
 /* 打刻漏れ */
 .punch-missing { background:#ffebee; color:#c62828; font-weight:bold; text-align:center; white-space:nowrap; }
@@ -520,6 +525,13 @@ td.saving { opacity:0.5; }
 .wp-save-one:hover { background:#1d4ed8; }
 .wp-del { border:1px solid #e57373; color:#c62828; background:#fff; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:12px; }
 #wp-assign td select { padding:2px 4px; font-size:12px; }
+/* スタッフ割当 + 出勤曜日マトリクス */
+#wp-assign th, #wp-assign td { border:1px solid #e2e2e2; padding:3px 6px; }
+#wp-assign th { background:#f0f0f0; text-align:center; }
+#wp-assign td:nth-child(n+3), #wp-assign th:nth-child(n+3) { text-align:center; width:34px; }
+#wp-assign th.wd-sat, #wp-assign td.wd-sat { background:#eaf3ff; }
+#wp-assign th.wd-sun, #wp-assign td.wd-sun { background:#ffeef0; }
+#wp-assign .wd-chk { width:16px; height:16px; cursor:pointer; }
 
 /* ヘッダリンク */
 .header-links {
@@ -743,8 +755,9 @@ td.saving { opacity:0.5; }
         または:
         <select id="indiv-staff-select"></select>
         <span id="indiv-loading"></span>
-        <!-- 名前のすぐ右: 当月出勤日数 + 託児利用バッジ -->
+        <!-- 名前のすぐ右: 当月出勤日数 + 当月残業 + 託児利用バッジ -->
         <span id="indiv-days-badge"></span>
+        <span id="indiv-ot-badge"></span>
         <span id="indiv-care-badge"></span>
       </p>
 
@@ -878,9 +891,10 @@ td.saving { opacity:0.5; }
       <h3 style="margin:14px 0 6px">パターン定義</h3>
       <div id="wp-patterns"></div>
 
-      <h3 style="margin:18px 0 6px">スタッフ割当</h3>
+      <h3 style="margin:18px 0 6px">スタッフ割当 ＋ 出勤曜日マトリクス</h3>
       <p class="muted" style="margin-top:0">
-        各スタッフのパターンを選択(未選択=本院標準)。
+        各スタッフのパターンを選択(未選択=本院標準)。右側の月〜日は<b>本来の出勤曜日</b>のチェックです
+        (初期値は割当パターンから自動推定、手動で調整可)。<b>変更後は上部の「保存」</b>で全端末に反映されます。
         <input type="search" id="wp-staff-search" placeholder="氏名で絞り込み" style="margin-left:8px">
       </p>
       <div class="table-wrap"><table id="wp-assign"></table></div>
@@ -2140,6 +2154,38 @@ function isNumericCell(s) {
 let _indivStaffListLoaded = false;
 const _indivCache = {};  // { staffName: { header, rows } }
 
+// サマリー(全スタッフ月次)を取得してキャッシュ。名簿の並べ替え(出勤実績)に使う。
+function ensureSummary() {
+  if (typeof _summaryData !== "undefined" && _summaryData) return Promise.resolve(_summaryData);
+  return callApi("summary").then(d => { try { _summaryData = d; } catch (e) {} return d; }).catch(() => null);
+}
+// スタッフ名ラベル "氏名 (123)" の () 内番号を取り出す(無ければ最大値=末尾寄り)
+function staffCodeNum(label) {
+  const m = String(label == null ? "" : label).match(/[\(（]\s*0*(\d+)/);
+  return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+// 指定スタッフの「最新月」の出勤日数合計。判定不能なら null(=0扱いしない)
+function staffMonthWorked(label, sum) {
+  if (!sum || !Array.isArray(sum.staff) || !Array.isArray(sum.months) || !sum.months.length) return null;
+  const key = wpStripName(label).replace(/[\s　]/g, "");
+  const mi = sum.months.length - 1;  // 最新月
+  const st = sum.staff.find(s => wpStripName(s.name).replace(/[\s　]/g, "") === key);
+  if (!st || !Array.isArray(st.monthlyWeekday) || !st.monthlyWeekday[mi]) return null;
+  const w = st.monthlyWeekday[mi].worked || [];
+  return w.reduce((a, b) => a + (b || 0), 0);
+}
+// 名簿の並べ替え: ()内番号の昇順。ただし当月出勤実績が0のスタッフは末尾へ。
+function sortStaffRoster(list, sum) {
+  return (list || []).slice().sort((a, b) => {
+    const wa = staffMonthWorked(a, sum), wb = staffMonthWorked(b, sum);
+    const za = (wa === 0) ? 1 : 0, zb = (wb === 0) ? 1 : 0;  // 出勤0 は後ろ
+    if (za !== zb) return za - zb;
+    const ca = staffCodeNum(a), cb = staffCodeNum(b);
+    if (ca !== cb) return ca - cb;
+    return String(a).localeCompare(String(b), "ja");
+  });
+}
+
 function loadIndivStaffList() {
   if (_indivStaffListLoaded) return;
   _indivStaffListLoaded = true;
@@ -2150,10 +2196,11 @@ function loadIndivStaffList() {
   const loading = document.getElementById("indiv-loading");
   loading.textContent = "スタッフ一覧読み込み中...";
 
-  callApi("staff_list")
-    .then(data => {
+  Promise.all([callApi("staff_list"), ensureSummary()])
+    .then(([data, sum]) => {
       loading.textContent = "";
-      const staffList = data.staff || [];
+      // 名簿順: ()内番号の昇順(当月出勤0は末尾)
+      const staffList = sortStaffRoster(data.staff || [], sum);
 
       // ドロップダウン
       sel.innerHTML = '<option value="">(選択してください)</option>';
@@ -2664,6 +2711,10 @@ function renderCombinedTable() {
     if (tr[8] === "__TOTAL_OVER__") tr[8] = hoursToHHMM(dispOverMin / 60);
     if (tr[9] === "__TOTAL_SPEC__") tr[9] = hoursToHHMM(dispSpecMin / 60);
   });
+
+  // 名前の横: 当月の合計残業時間バッジ
+  const otBadge = document.getElementById("indiv-ot-badge");
+  if (otBadge) otBadge.textContent = "当月残業 " + hoursToHHMM(dispOverMin / 60);
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
     // 打刻列 (5): 打刻漏れを赤表示
@@ -3502,11 +3553,14 @@ function loadPatterns() {
   Promise.all([
     callApi("work_patterns").then(d => d.data),   // ← エラーはここで捕捉して画面表示する
     (_wpStaff ? Promise.resolve(_wpStaff) : callApi("staff_list").then(d => d.staff || []).catch(() => [])),
-  ]).then(([data, staff]) => {
+    ensureSummary(),
+  ]).then(([data, staff, sum]) => {
     _wpData = (data && Array.isArray(data.patterns)) ? data : { patterns: [], assignments: {} };
     if (!_wpData.assignments) _wpData.assignments = {};
+    if (!_wpData.weekdays) _wpData.weekdays = {};
     _wpLoaded = true;
-    _wpStaff = staff;
+    // 名簿順: ()内番号の昇順(当月出勤0は末尾)
+    _wpStaff = sortStaffRoster(staff, sum);
     if (loading) loading.textContent = "";
     renderPatternCards();
     renderAssign();
@@ -3598,6 +3652,8 @@ function updateCardSums(card) {
   if (wt) wt.textContent = "週出勤計 " + wpFmtMin(total);
 }
 
+const WP_MATRIX_WD = ["月", "火", "水", "木", "金", "土", "日"];
+
 function renderAssign() {
   const tbl = document.getElementById("wp-assign");
   if (!tbl) return;
@@ -3605,14 +3661,35 @@ function renderAssign() {
   const opts = ['<option value="">(本院標準)</option>']
     .concat((_wpData.patterns || []).map(p =>
       '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.id + " : " + (p.name || "")) + '</option>')).join("");
-  let html = "<thead><tr><th>スタッフ</th><th>パターン</th></tr></thead><tbody>";
+  const weekdays = _wpData.weekdays || {};
+  // 出勤曜日の初期値: 保存済みがあればそれ、無ければ割当パターンの登録曜日から推定
+  function wdChecked(key, wd) {
+    const saved = weekdays[key];
+    if (saved && typeof saved === "object") return !!saved[wd];
+    const pid = _wpData.assignments[key];
+    const pat = pid ? (_wpData.patterns || []).find(p => p.id === pid) : null;
+    return !!(pat && pat.days && pat.days[wd]);
+  }
+  let head = "<thead><tr><th>スタッフ</th><th>パターン</th>";
+  WP_MATRIX_WD.forEach(wd => {
+    const cls = wd === "土" ? ' class="wd-sat"' : (wd === "日" ? ' class="wd-sun"' : '');
+    head += "<th" + cls + ">" + wd + "</th>";
+  });
+  head += "</tr></thead><tbody>";
+  let html = head;
   (_wpStaff || []).forEach(label => {
     if (filter && label.indexOf(filter) < 0) return;
     const key = wpStripName(label);
     const cur = _wpData.assignments[key] || "";
     const sel = '<select data-key="' + escapeHtml(key) + '">' +
       opts.replace('value="' + escapeHtml(cur) + '"', 'value="' + escapeHtml(cur) + '" selected') + '</select>';
-    html += "<tr><td>" + escapeHtml(label) + "</td><td>" + sel + "</td></tr>";
+    let checks = "";
+    WP_MATRIX_WD.forEach(wd => {
+      const cls = wd === "土" ? ' class="wd-sat"' : (wd === "日" ? ' class="wd-sun"' : '');
+      checks += '<td' + cls + '><input type="checkbox" class="wd-chk" data-key="' + escapeHtml(key) +
+        '" data-wd="' + wd + '"' + (wdChecked(key, wd) ? " checked" : "") + "></td>";
+    });
+    html += "<tr><td>" + escapeHtml(label) + "</td><td>" + sel + "</td>" + checks + "</tr>";
   });
   html += "</tbody>";
   tbl.innerHTML = html;
@@ -3642,11 +3719,23 @@ function collectWpData() {
       days: days,
     });
   });
-  const assignments = {};
+  // 割当は既存値とマージ(氏名で絞り込み中でも非表示スタッフの割当を失わない)
+  const assignments = Object.assign({}, (_wpData && _wpData.assignments) || {});
   document.querySelectorAll("#wp-assign select").forEach(sel => {
-    if (sel.value) assignments[sel.getAttribute("data-key")] = sel.value;
+    const k = sel.getAttribute("data-key");
+    if (sel.value) assignments[k] = sel.value; else delete assignments[k];
   });
-  return { patterns: patterns, assignments: assignments };
+  // 出勤曜日マトリクス(スタッフ×曜日のチェック)。表示中の行のみ更新し、他は既存値を保持。
+  const weekdays = Object.assign({}, (_wpData && _wpData.weekdays) || {});
+  document.querySelectorAll("#wp-assign .wd-chk").forEach(chk => {
+    const key = chk.getAttribute("data-key");
+    const wd = chk.getAttribute("data-wd");
+    if (!weekdays[key] || typeof weekdays[key] !== "object") weekdays[key] = {};
+    if (chk.checked) weekdays[key][wd] = true; else delete weekdays[key][wd];
+  });
+  // 空になった曜日設定は削除して肥大化を防ぐ
+  Object.keys(weekdays).forEach(k => { if (!Object.keys(weekdays[k]).length) delete weekdays[k]; });
+  return { patterns: patterns, assignments: assignments, weekdays: weekdays };
 }
 
 function savePatterns() {
