@@ -1885,10 +1885,12 @@ function loadSample(){
 function initEvents(){
   /* タブ切替 */
   $$("#tabs button").forEach(b => b.addEventListener("click", () => {
+    const target = $("#view-"+b.dataset.view);
+    if(!target) return; // 対応ビューが無ければ何もしない(画面を真っ白にしない)
     $$("#tabs button").forEach(x => x.classList.remove("active"));
     b.classList.add("active");
     $$(".view").forEach(v => v.classList.remove("active"));
-    $("#view-"+b.dataset.view).classList.add("active");
+    target.classList.add("active");
   }));
   /* ドロップ */
   const drop = $("#drop"), fileInput = $("#file");
@@ -3253,18 +3255,38 @@ function wpDayWorkMin(pat, wd) {
 
 function loadPatterns() {
   const loading = document.getElementById("wp-loading");
+  const box = document.getElementById("wp-patterns");
   if (loading) loading.textContent = "読み込み中...";
+  if (box) box.innerHTML = "";
   Promise.all([
-    loadWpData(),
+    callApi("work_patterns").then(d => d.data),   // ← エラーはここで捕捉して画面表示する
     (_wpStaff ? Promise.resolve(_wpStaff) : callApi("staff_list").then(d => d.staff || []).catch(() => [])),
   ]).then(([data, staff]) => {
+    _wpData = (data && Array.isArray(data.patterns)) ? data : { patterns: [], assignments: {} };
+    if (!_wpData.assignments) _wpData.assignments = {};
+    _wpLoaded = true;
     _wpStaff = staff;
     if (loading) loading.textContent = "";
     renderPatternCards();
     renderAssign();
     wireWpOnce();
+    if (box && !_wpData.patterns.length) {
+      box.innerHTML = '<p class="muted">パターンがありません。「＋ 変則パターンを追加」で追加するか、' +
+        '<button type="button" class="btn ghost" id="wp-reload">再読み込み</button> してください。</p>';
+      const rl = document.getElementById("wp-reload");
+      if (rl) rl.addEventListener("click", loadPatterns);
+    }
   }).catch(err => {
-    if (loading) loading.textContent = "エラー: " + err.message;
+    if (loading) loading.textContent = "";
+    const msg = (err && err.message) || String(err);
+    if (box) {
+      box.innerHTML = '<div style="color:#c62828;background:#ffebee;border:1px solid #e57373;border-radius:6px;padding:12px">' +
+        '<b>勤務形態マスタを読み込めませんでした。</b><br>' + escapeHtml(msg) +
+        '<br><span class="muted">※ 認証エラーの場合、Apps Scriptエディタで一度いずれかの関数を実行して権限を承認し直してください(メール送信機能の追加で再承認が必要な場合があります)。</span>' +
+        '<br><button type="button" class="btn" id="wp-retry" style="margin-top:8px">再試行</button></div>';
+      const rt = document.getElementById("wp-retry");
+      if (rt) rt.addEventListener("click", loadPatterns);
+    }
   });
 }
 
