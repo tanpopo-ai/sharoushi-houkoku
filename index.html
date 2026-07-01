@@ -2756,7 +2756,8 @@ function renderCombinedTable() {
       regular = !!(wd && regularWeekdaySet && regularWeekdaySet.has(wd));
 
       // 休み(出退勤ともに実績なし=到来済みの日)→ 行をグレーで強調
-      off = dayDate <= _today && clockIn == null && clockOut == null;
+      //   ジョブカンは休みの日に "0:00" を入れることがあるため、null と 0 の両方を実績なしとみなす
+      off = dayDate <= _today && !clockIn && !clockOut;
 
       // 正規の出勤曜日以外に出勤している日(緑)
       if (worked && wd && regularWeekdaySet && !regularWeekdaySet.has(wd)) extra = true;
