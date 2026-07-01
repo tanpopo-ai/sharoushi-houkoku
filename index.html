@@ -2017,20 +2017,36 @@ function callApiPost(action, bodyObj) {
     .then(data => { if (data.error) throw new Error(data.error); return data; });
 }
 
-// 日次備考: 指定スタッフ(コード付きタブ名)の備考+特出フラグを取得
-//   { notes: {"2026/06/01":"..."}, toku: {"2026/06/01":true} }
+// 特出チェックの保存キー。既存の備考保存(set_day_note)をそのまま使うため、
+// 年月日に接尾辞を付けた別キーで保存する(バックエンド改修・再デプロイ不要)。
+const TOKU_SUFFIX = "|特出";
+function tokuKey(ymd) { return ymd + TOKU_SUFFIX; }
+
+// 日次備考: 指定スタッフ(コード付きタブ名)の生ノート辞書を取得
+//   { "2026/06/01":"備考", "2026/06/01|特出":"1", ... }
 function loadDayNotes(name) {
-  return callApi("day_notes", { name: name })
-    .then(d => ({ notes: d.notes || {}, toku: d.toku || {} }))
-    .catch(() => ({ notes: {}, toku: {} }));
+  return callApi("day_notes", { name: name }).then(d => d.notes || {}).catch(() => ({}));
+}
+// 生ノート辞書から 備考マップ と 特出マップ を分離する
+function splitDayNotes(raw) {
+  const notes = {}, toku = {};
+  Object.keys(raw || {}).forEach(k => {
+    if (k.slice(-TOKU_SUFFIX.length) === TOKU_SUFFIX) {
+      const base = k.slice(0, -TOKU_SUFFIX.length);
+      if (String(raw[k]).trim() === "1") toku[base] = true;
+    } else {
+      notes[k] = raw[k];
+    }
+  });
+  return { notes: notes, toku: toku };
 }
 // 日次備考: 1日分を保存
 function saveDayNote(name, ymd, text) {
   return callApi("set_day_note", { name: name, ymd: ymd, text: text });
 }
-// 特出チェック: 1日分を保存(✓=1 / 解除="")
+// 特出チェック: 1日分を保存(✓=1 / 解除="") — 備考保存の仕組みを流用
 function saveDayToku(name, ymd, on) {
-  return callApi("set_day_toku", { name: name, ymd: ymd, toku: on ? "1" : "" });
+  return callApi("set_day_note", { name: name, ymd: tokuKey(ymd), text: on ? "1" : "" });
 }
 
 // 備考: 保存ボタンの表示制御・未保存件数の表示・一括保存
@@ -2293,9 +2309,10 @@ function renderIndivData(data) {
   _indivNotes = {};
   _indivToku = {};
   if (typeof loadDayNotes === "function") {
-    loadDayNotes(_indivStaffFull).then(n => {
-      _indivNotes = (n && n.notes) || {};
-      _indivToku = (n && n.toku) || {};
+    loadDayNotes(_indivStaffFull).then(raw => {
+      const split = splitDayNotes(raw);
+      _indivNotes = split.notes;
+      _indivToku = split.toku;
       if (_indivGrouped) renderCombinedTable();
     });
   }
