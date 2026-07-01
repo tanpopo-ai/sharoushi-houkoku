@@ -268,8 +268,16 @@ tr.row-extra > td.loc-honin { background:#ffd6e3; }  /* 勤務地セルの色分
 tr.row-extra > td.loc-bunin { background:#cce8ff; }
 tr.row-extra > td.loc-rest  { background:#e0e0e0; }
 tr.row-extra > td.time-flag { background:#fff59d; }  /* 遅刻/早退の強調も維持 */
-/* 「特出?」アラート(緑行の左端・赤字太字)。特出✓で非表示になる。 */
-.toku-alert { display:inline-block; margin-left:6px; color:#d32f2f; font-weight:bold; }
+/* 「特出?」アラートを行の枠外(左側の余白)に配置し、行幅・行高を変えない。 */
+.table-wrap:has(#tbl-combined) { padding-left: 44px; }
+tr.row-extra > td:first-child { position: relative; }
+.toku-alert {
+  position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
+  margin-right: 5px; white-space: nowrap;
+  color:#d32f2f; font-weight:bold; font-size:11px;
+}
+/* 「本院→分院」は文字数が多いので小さめ表示にして列幅を広げない */
+.loc-move { font-size:10px; letter-spacing:-0.5px; white-space:nowrap; }
 /* 特出チェックボックス列 */
 .toku-check { width:18px; height:18px; cursor:pointer; }
 td.saving { opacity:0.5; }
@@ -2618,7 +2626,8 @@ function renderCombinedTable() {
     // 出勤場所列 (6): 本院/分院/休み の色分け
     if (col === 6) {
       if (val === "本院") return "loc-honin";
-      if (val === "分院" || val === "本院→分院") return "loc-bunin";
+      if (val === "本院→分院") return "loc-bunin loc-move";  // 場所移動: 幅を変えないよう小さめ表示
+      if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
     // 休暇列 (7): 申請があれば色付け
