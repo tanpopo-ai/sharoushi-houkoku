@@ -2079,6 +2079,8 @@ const DAY_FLAG_DEFS = [
 function flagSuffix(key) { return "|" + key; }
 // 排他グループ: 一方をONにすると相方をOFFにする(特出⇔交代出勤 / 交代休⇔休暇)
 const DAY_FLAG_EXCLUSIVE = { "特出": "交代出勤", "交代出勤": "特出", "交代休": "休暇", "休暇": "交代休" };
+// チェック列見出しの文字色(アラート/塗りつぶし色に連動): 緑=特出/交代出勤, 橙=交代休/休暇, 紫=分本
+const DAY_FLAG_COLOR = { "特出": "#2e7d32", "交代出勤": "#2e7d32", "交代休": "#e65100", "休暇": "#e65100", "分本": "#8e24aa" };
 // 集計に影響するフラグ(変更時は表を再計算): 特出=特出時間の計上 / 分本=定時変更
 function dayFlagIsCalc(key) { return key === "特出" || key === "分本"; }
 
@@ -2213,10 +2215,26 @@ function staffCodeNum(label) {
   return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
 }
 // 指定スタッフの「最新月」の出勤日数合計。判定不能なら null(=0扱いしない)
+// 参照月インデックス: 月初でデータが少ない当月を避け、実績が十分にある最新の月を選ぶ。
+//   各月の occ(到来済み曜日回数)合計が最大の50%以上となる最新の月。
+function summaryRefMonthIndex(sum) {
+  if (!sum || !Array.isArray(sum.months) || !sum.months.length) return -1;
+  const totals = sum.months.map((_, mIdx) => {
+    let t = 0;
+    (sum.staff || []).forEach(st => {
+      const wk = st.monthlyWeekday && st.monthlyWeekday[mIdx];
+      if (wk && wk.occ) t += wk.occ.reduce((a, b) => a + (b || 0), 0);
+    });
+    return t;
+  });
+  const maxT = Math.max.apply(null, totals.concat([0]));
+  for (let k = totals.length - 1; k >= 0; k--) { if (totals[k] >= maxT * 0.5) return k; }
+  return totals.length - 1;
+}
 function staffMonthWorked(label, sum) {
   if (!sum || !Array.isArray(sum.staff) || !Array.isArray(sum.months) || !sum.months.length) return null;
   const key = wpStripName(label).replace(/[\s　]/g, "");
-  const mi = sum.months.length - 1;  // 最新月
+  const mi = summaryRefMonthIndex(sum);  // 実績が十分な最新月
   const st = sum.staff.find(s => wpStripName(s.name).replace(/[\s　]/g, "") === key);
   if (!st || !Array.isArray(st.monthlyWeekday) || !st.monthlyWeekday[mi]) return null;
   const w = st.monthlyWeekday[mi].worked || [];
@@ -2240,7 +2258,8 @@ function sortStaffRoster(list, sum) {
 function computeAlertStaff() {
   const sum = _summaryData;
   if (!sum || !Array.isArray(sum.staff) || !Array.isArray(sum.months) || !sum.months.length) return [];
-  const mi = sum.months.length - 1;  // 最新月
+  const mi = summaryRefMonthIndex(sum);  // 実績が十分な最新月
+  if (mi < 0) return [];
   const WDN = ["月", "火", "水", "木", "金", "土", "日"];
   const norm = s => wpStripName(s).replace(/[\s　]/g, "");
   const wkMap = {};
@@ -2260,7 +2279,11 @@ function computeAlertStaff() {
   const out = [];
   (_indivStaffList || []).forEach(label => {
     const nn = norm(label);
-    const wk = wkMap[nn];
+    let wk = wkMap[nn];
+    if (!wk) {  // 表記ゆれ対策: 部分一致で拾う
+      const k = Object.keys(wkMap).find(k => k && nn && (k.indexOf(nn) >= 0 || nn.indexOf(k) >= 0));
+      if (k) wk = wkMap[k];
+    }
     if (!wk) return;
     const worked = wk.worked || [], occ = wk.occ || [];
     let regular = matrixMap[nn];
@@ -2658,13 +2681,23 @@ function setDayFlagState(key, ymd, on) {
 //   特出? … 特出 or 交代出勤 で消える
 //   休み? … 交代休 or 休暇 で消える
 //   分院→本院? … 分本 で消える
+// 行の塗りつぶし(緑/オレンジ/紫)とアラート表示を、現在のフラグ状態から更新する。
+//   アラートが解決(該当チェックON)されたら 塗りつぶしも消す。休みの場合はグレーに戻す。
+//   カテゴリ: extra=緑(特出/交代出勤で解決) rest=オレンジ(交代休/休暇で解決) bunin=紫(分本で解決)
 function refreshRowAlerts(tr, ymd) {
-  const ta = tr.querySelector(".toku-alert");
-  if (ta) ta.style.display = (dayFlagOn("特出", ymd) || dayFlagOn("交代出勤", ymd)) ? "none" : "";
-  const ra = tr.querySelector(".rest-alert");
-  if (ra) ra.style.display = (dayFlagOn("交代休", ymd) || dayFlagOn("休暇", ymd)) ? "none" : "";
-  const ba = tr.querySelector(".bunin-alert");
-  if (ba) ba.style.display = dayFlagOn("分本", ymd) ? "none" : "";
+  const cat = tr.dataset.fillCat || "";
+  const isOff = tr.dataset.off === "1";
+  let resolved = false;
+  if (cat === "extra") resolved = dayFlagOn("特出", ymd) || dayFlagOn("交代出勤", ymd);
+  else if (cat === "rest") resolved = dayFlagOn("交代休", ymd) || dayFlagOn("休暇", ymd);
+  else if (cat === "bunin") resolved = dayFlagOn("分本", ymd);
+  const showCat = !!cat && !resolved;
+  tr.classList.toggle("row-extra", cat === "extra" && showCat);
+  tr.classList.toggle("row-rest", cat === "rest" && showCat);
+  tr.classList.toggle("row-bunin-anom", cat === "bunin" && showCat);
+  tr.classList.toggle("row-off", !showCat && isOff);   // 塗り解除後、休みならグレー
+  const al = tr.querySelector(".toku-alert, .rest-alert, .bunin-alert");
+  if (al) al.style.display = resolved ? "none" : "";
 }
 // 統合表を再描画するが、未保存の備考入力(値・未保存マーク)は保持する
 function rerenderCombinedPreserveNotes() {
@@ -2934,14 +2967,24 @@ function renderCombinedTable() {
 
   // 備考入力の注入 + 遅刻/早退セルの強調 + 枠外アラート + フラグ用チェックボックス
   const tbl = document.getElementById("tbl-combined");
+  // チェック列見出しの文字色をアラート色に連動(nth-child が効かない環境向けにJSで直接指定)
+  if (tbl) {
+    const headTr = tbl.querySelector("thead tr");
+    if (headTr) DAY_FLAG_DEFS.forEach(f => {
+      const th = headTr.children[f.col];
+      if (th) { th.style.color = DAY_FLAG_COLOR[f.key] || ""; th.style.fontWeight = "bold"; }
+    });
+  }
   const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
   bodyRows.forEach((tr, i) => {
-    // 行の背景強調(優先度: 紫 > 緑 > オレンジ)
-    if (rowPurple[i]) tr.classList.add("row-bunin-anom");       // 分院なしパターン×分院→本院
-    else if (rowExtra[i]) tr.classList.add("row-extra");        // 本来以外の出勤(緑)
-    else if (rowRest[i]) tr.classList.add("row-rest");          // 本来の出勤曜日に休み(オレンジ)
-    else if (rowOff[i]) tr.classList.add("row-off");            // 休み(出退勤実績0)→ グレー
-    if (rowRegular[i]) tr.classList.add("row-regular");         // 正規の出勤曜日 → 行全体を赤枠
+    // 塗りつぶしカテゴリ(優先度: 紫 > 緑 > オレンジ)。off(グレー)は解決不可で独立。
+    let fillCat = "";
+    if (rowPurple[i]) fillCat = "bunin";
+    else if (rowExtra[i]) fillCat = "extra";
+    else if (rowRest[i]) fillCat = "rest";
+    tr.dataset.fillCat = fillCat;
+    tr.dataset.off = rowOff[i] ? "1" : "";
+    if (rowRegular[i]) tr.classList.add("row-regular");         // 正規の出勤曜日 → 日付・曜日を赤字太字
     // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
     if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
     if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
@@ -2961,15 +3004,14 @@ function renderCombinedTable() {
     const inp = cell.querySelector("input");
     inp.addEventListener("input", () => { inp.classList.add("dirty"); inp.classList.remove("saved", "save-error"); markNotesDirty(); });
 
-    // 左端(枠外)アラート: 緑=「特出?」/ オレンジ=「休み?」/ 紫=「分院→本院?」
-    if (tr.cells[0]) {
-      let al = null;
-      if (rowPurple[i]) { al = document.createElement("span"); al.className = "bunin-alert"; al.textContent = "分院→本院?"; }
-      else if (rowExtra[i]) { al = document.createElement("span"); al.className = "toku-alert"; al.textContent = "特出?交代?"; }
-      else if (rowRest[i]) { al = document.createElement("span"); al.className = "rest-alert"; al.textContent = "休み?"; }
-      if (al) tr.cells[0].appendChild(al);
-      refreshRowAlerts(tr, ymd);  // 既にフラグ済みなら非表示
+    // 左端(枠外)アラート: 緑=「特出?交代?」/ オレンジ=「休み?」/ 紫=「分院→本院?」
+    if (tr.cells[0] && fillCat) {
+      const al = document.createElement("span");
+      al.className = fillCat === "bunin" ? "bunin-alert" : fillCat === "extra" ? "toku-alert" : "rest-alert";
+      al.textContent = fillCat === "bunin" ? "分院→本院?" : fillCat === "extra" ? "特出?交代?" : "休み?";
+      tr.cells[0].appendChild(al);
     }
+    refreshRowAlerts(tr, ymd);  // 塗りつぶし+アラート表示をフラグ状態から反映
 
     // フラグ用チェックボックス(特出 / 交代出勤 / 交代休 / 休暇 / 分→本)
     DAY_FLAG_DEFS.forEach(f => {
@@ -3134,11 +3176,10 @@ function renderIndivExtras(rows, year, month) {
     (_pat && _pat.kind === "変則" ? ' <span class="muted">(残業/特出はパターン基準で算出)</span>' : '') +
     '</span>';
 
-  // 赤枠の説明(あいているスペースに表示)
+  // 説明(あいているスペースに表示)。日付・曜日の赤字太字 = 本来の出勤日。
   const _redNote =
     '<div style="flex-basis:100%;margin-top:2px;font-size:11px;color:#c62828">' +
-    '※ <span style="border:2px solid #d32f2f;border-radius:3px;padding:0 5px">赤枠</span>' +
-    ' = 本来の出勤日(勤務形態マスタの出勤曜日)。上の曜日欄と下の一覧表の行に表示しています。' +
+    '※ <b style="color:#d32f2f">赤字太字</b>の日付・曜日 = 本来の出勤日(勤務形態マスタの出勤曜日)。' +
     'それ以外の曜日の出勤は緑「特出?交代?」、本来の出勤日の欠勤はオレンジ「休み?」で表示します。' +
     '</div>';
 
