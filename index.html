@@ -2918,6 +2918,7 @@ function renderIndivExtras(rows, year, month) {
   const satDays = {};  // 日 -> 出勤したか(boolean) ※出勤有無に関わらず全土曜を記録
   const sunDays = {};  // 日 -> 出勤したか(boolean) ※全日曜を記録
   let totalWorked = 0; // 当月の出勤日数合計
+  let regularDays = 0; // 当月の本来の出勤日数(正規の出勤曜日にあたる日数)
 
   rows.forEach(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2930,13 +2931,18 @@ function renderIndivExtras(rows, year, month) {
     const wi = WD.indexOf(wd);
     if (worked) totalWorked++;
     if (worked && wi >= 0) wdWorked[wi]++;  // 曜日グリッドは出勤回数のみ
+    if (_indivRegularWd && _indivRegularWd.has(wd)) regularDays++;  // 本来の出勤日数
     if (wd === "土") satDays[dd] = worked;
     if (wd === "日") sunDays[dd] = worked;
   });
 
-  // --- 名前の横: 当月出勤日数 ---
+  // --- 名前の横: 当月出勤日数 (出勤実績 / 本来の出勤日数) ---
   const daysBadge = document.getElementById("indiv-days-badge");
-  if (daysBadge) daysBadge.textContent = "当月出勤 " + totalWorked + "日";
+  if (daysBadge) {
+    daysBadge.textContent = (_indivRegularWd)
+      ? ("当月出勤 " + totalWorked + "/" + regularDays + "日")
+      : ("当月出勤 " + totalWorked + "日");
+  }
 
   // --- 曜日グリッド HTML (曜日ごとに 見出し+出勤回数 の縦セル) ---
   //     正規の出勤曜日(勤務形態マスタのマトリクス等)は赤枠で囲う。
@@ -3001,10 +3007,18 @@ function renderIndivExtras(rows, year, month) {
     (_pat && _pat.kind === "変則" ? ' <span class="muted">(残業/特出はパターン基準で算出)</span>' : '') +
     '</span>';
 
+  // 赤枠の説明(あいているスペースに表示)
+  const _redNote =
+    '<div style="flex-basis:100%;margin-top:2px;font-size:11px;color:#c62828">' +
+    '※ <span style="border:2px solid #d32f2f;border-radius:3px;padding:0 5px">赤枠</span>' +
+    ' = 本来の出勤日(勤務形態マスタの出勤曜日)。上の曜日欄と下の一覧表の行に表示しています。' +
+    'それ以外の曜日の出勤は緑「特出?交代?」、本来の出勤日の欠勤はオレンジ「休み?」で表示します。' +
+    '</div>';
+
   const extras = document.getElementById("indiv-extras");
   if (extras) {
     extras.innerHTML =
-      _patHtml + '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml + restHtml;
+      _patHtml + '<span class="extras-label">出勤曜日:</span>' + grid + allowHtml + restHtml + _redNote;
   }
 
   // --- 託児利用バッジ (名前のすぐ右) ---
