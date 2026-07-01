@@ -86,6 +86,9 @@ function doGet(e) {
       case "set_day_note":
         result = setDayNote(e.parameter.name || "", e.parameter.ymd || "", e.parameter.text || "");
         break;
+      case "set_day_toku":
+        result = setDayToku(e.parameter.name || "", e.parameter.ymd || "", e.parameter.toku || "");
+        break;
       case "inquiries":
         result = getInquiries();
         break;
@@ -761,17 +764,51 @@ const DAY_NOTES_SHEET = "日次備考";
 
 function getDayNotes(name) {
   const notes = {};
-  if (!name) return { notes: notes };
+  const toku = {};   // 特出チェック { "2026/06/01": true }
+  if (!name) return { notes: notes, toku: toku };
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const ws = ss.getSheetByName(DAY_NOTES_SHEET);
   if (ws && ws.getLastRow() >= 2) {
     // 表示値で読む(年月日はテキスト「2026/06/01」。日付型に変換された旧行とのズレを防ぐ)
-    const v = ws.getRange(1, 1, ws.getLastRow(), 3).getDisplayValues();
+    // 列: 1スタッフ 2年月日 3備考 4更新日時 5特出
+    const v = ws.getRange(1, 1, ws.getLastRow(), 5).getDisplayValues();
     for (let i = 1; i < v.length; i++) {
-      if (String(v[i][0]) === name) notes[String(v[i][1])] = String(v[i][2] || "");
+      if (String(v[i][0]) !== name) continue;
+      const ymd = String(v[i][1]);
+      notes[ymd] = String(v[i][2] || "");
+      if (String(v[i][4] || "").trim() === "1") toku[ymd] = true;
     }
   }
-  return { notes: notes };
+  return { notes: notes, toku: toku };
+}
+
+// 特出チェックの保存/解除(列5)。行が無ければ作成する。
+function setDayToku(name, ymd, toku) {
+  if (!name || !ymd) throw new Error("name と ymd は必須です");
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let ws = ss.getSheetByName(DAY_NOTES_SHEET);
+  if (!ws) {
+    ws = ss.insertSheet(DAY_NOTES_SHEET);
+    ws.getRange(1, 1, 1, 5).setValues([["スタッフ", "年月日", "備考", "更新日時", "特出"]]);
+    ws.setFrozenRows(1);
+  }
+  const flag = (String(toku) === "1" || String(toku) === "true") ? "1" : "";
+  const last = ws.getLastRow();
+  if (last >= 2) {
+    const v = ws.getRange(1, 1, last, 2).getDisplayValues();
+    for (let i = 1; i < v.length; i++) {
+      if (String(v[i][0]) === name && String(v[i][1]) === ymd) {
+        ws.getRange(i + 1, 5).setValue(flag);
+        return { ok: true };
+      }
+    }
+  }
+  // 新規行(備考は空、特出のみ設定)
+  const r = last + 1;
+  ws.getRange(r, 1).setValue(name);
+  ws.getRange(r, 2).setNumberFormat("@").setValue(ymd);
+  ws.getRange(r, 5).setValue(flag);
+  return { ok: true };
 }
 
 function setDayNote(name, ymd, text) {
@@ -780,7 +817,7 @@ function setDayNote(name, ymd, text) {
   let ws = ss.getSheetByName(DAY_NOTES_SHEET);
   if (!ws) {
     ws = ss.insertSheet(DAY_NOTES_SHEET);
-    ws.getRange(1, 1, 1, 4).setValues([["スタッフ", "年月日", "備考", "更新日時"]]);
+    ws.getRange(1, 1, 1, 5).setValues([["スタッフ", "年月日", "備考", "更新日時", "特出"]]);
     ws.setFrozenRows(1);
   }
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");

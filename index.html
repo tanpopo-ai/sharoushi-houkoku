@@ -268,6 +268,11 @@ tr.row-extra > td.loc-honin { background:#ffd6e3; }  /* 勤務地セルの色分
 tr.row-extra > td.loc-bunin { background:#cce8ff; }
 tr.row-extra > td.loc-rest  { background:#e0e0e0; }
 tr.row-extra > td.time-flag { background:#fff59d; }  /* 遅刻/早退の強調も維持 */
+/* 「特出?」アラート(緑行の左端・赤字太字)。特出✓で非表示になる。 */
+.toku-alert { display:inline-block; margin-left:6px; color:#d32f2f; font-weight:bold; }
+/* 特出チェックボックス列 */
+.toku-check { width:18px; height:18px; cursor:pointer; }
+td.saving { opacity:0.5; }
 
 /* 託児利用バッジ (名前のすぐ右) */
 #indiv-care-badge .care-on {
@@ -2012,13 +2017,20 @@ function callApiPost(action, bodyObj) {
     .then(data => { if (data.error) throw new Error(data.error); return data; });
 }
 
-// 日次備考: 指定スタッフ(コード付きタブ名)の備考を取得 { "2026/06/01": "..." }
+// 日次備考: 指定スタッフ(コード付きタブ名)の備考+特出フラグを取得
+//   { notes: {"2026/06/01":"..."}, toku: {"2026/06/01":true} }
 function loadDayNotes(name) {
-  return callApi("day_notes", { name: name }).then(d => d.notes || {}).catch(() => ({}));
+  return callApi("day_notes", { name: name })
+    .then(d => ({ notes: d.notes || {}, toku: d.toku || {} }))
+    .catch(() => ({ notes: {}, toku: {} }));
 }
 // 日次備考: 1日分を保存
 function saveDayNote(name, ymd, text) {
   return callApi("set_day_note", { name: name, ymd: ymd, text: text });
+}
+// 特出チェック: 1日分を保存(✓=1 / 解除="")
+function saveDayToku(name, ymd, on) {
+  return callApi("set_day_toku", { name: name, ymd: ymd, toku: on ? "1" : "" });
 }
 
 // 備考: 保存ボタンの表示制御・未保存件数の表示・一括保存
@@ -2207,6 +2219,7 @@ let _indivColIdx = null;  // 列インデックスのキャッシュ
 let _indivStaffName = ""; // 選択中スタッフの氏名 (コード抜き、託児データ突合用)
 let _indivStaffFull = ""; // 選択中スタッフのタブ名 (コード付き・備考保存キー)
 let _indivNotes = {};     // { "2026/06/01": "備考テキスト" }
+let _indivToku = {};      // { "2026/06/01": true } 特出チェック
 
 // 氏名の正規化 (空白除去) — 託児フォームと勤怠で表記揺れがあっても突合できるように
 function normNameForMatch(s) {
@@ -2278,9 +2291,11 @@ function renderIndivData(data) {
   // 備考保存用にフルのタブ名(コード付き)も保持し、当該スタッフの備考を読み込む
   _indivStaffFull = String(data.name || "");
   _indivNotes = {};
+  _indivToku = {};
   if (typeof loadDayNotes === "function") {
     loadDayNotes(_indivStaffFull).then(n => {
-      _indivNotes = n || {};
+      _indivNotes = (n && n.notes) || {};
+      _indivToku = (n && n.toku) || {};
       if (_indivGrouped) renderCombinedTable();
     });
   }
@@ -2426,7 +2441,7 @@ function renderCombinedTable() {
   // 統合表:
   //  0日付 1休日区分 2出勤 3退勤 4実労働 5打刻 6出勤場所 7休暇 8残業 9特出 10託児 11備考
   const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間",
-                   "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考"];
+                   "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考", "特出"];
   let careMonthTotal = 0;
 
   // 残業/特出は「退勤 − 定時終了」で全スタッフ再計算する(早出は含めない・休憩の二重控除なし)
@@ -2531,10 +2546,11 @@ function renderCombinedTable() {
         if (schedEnd != null && clockOut != null && clockOut < schedEnd) early = true;
       }
 
-      // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら 本院→分院 と表示
-      //   (表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま)
+      // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら
+      //   「本院→分院」と表示(本院から分院への場所移動があったことを示す)。
+      //   表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま。
       if (loc === "本院" && clockIn != null && clockIn <= 510 && clockOut != null && clockOut >= 1170) {
-        dispLoc = "分院";
+        dispLoc = "本院→分院";
       }
 
       // 本来の出勤日以外に出勤しているか判定
@@ -2566,6 +2582,7 @@ function renderCombinedTable() {
       specStr,
       careStr,
       "",  // 備考: 後でinput注入
+      "",  // 特出: 後でcheckbox注入
     ];
   });
 
@@ -2584,7 +2601,7 @@ function renderCombinedTable() {
     // 出勤場所列 (6): 本院/分院/休み の色分け
     if (col === 6) {
       if (val === "本院") return "loc-honin";
-      if (val === "分院") return "loc-bunin";
+      if (val === "分院" || val === "本院→分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
     // 休暇列 (7): 申請があれば色付け
@@ -2607,13 +2624,42 @@ function renderCombinedTable() {
     if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
     const ymd = rowKeys[i];
     const cell = tr.cells[11];
+    const tokuCell = tr.cells[12];
     if (!cell) return;
-    if (!ymd) { cell.textContent = ""; return; }
+    if (!ymd) { cell.textContent = ""; if (tokuCell) tokuCell.textContent = ""; return; }
     const val = _indivNotes[ymd] || "";
     cell.innerHTML = '<input class="note-input" data-ymd="' + ymd + '" value="' + escapeHtml(val) + '" placeholder="メモ">';
     const inp = cell.querySelector("input");
     // 入力したら「未保存」マーク。保存は「備考を保存」ボタンで明示的に行う
     inp.addEventListener("input", () => { inp.classList.add("dirty"); inp.classList.remove("saved", "save-error"); markNotesDirty(); });
+
+    // 薄い緑色の行 → 左端(日付セル)に赤字太字アラート「特出?」を表示
+    const checked = !!_indivToku[ymd];
+    if (rowExtra[i] && tr.cells[0]) {
+      const al = document.createElement("span");
+      al.className = "toku-alert";
+      al.textContent = "特出?";
+      if (checked) al.style.display = "none";  // 特出✓済みならアラート非表示
+      tr.cells[0].appendChild(al);
+    }
+
+    // 特出チェックボックス(備考の右)。✓でアラートを消す。緑背景は残す。
+    if (tokuCell) {
+      tokuCell.innerHTML = '<input type="checkbox" class="toku-check"' + (checked ? " checked" : "") + '>';
+      const cb = tokuCell.querySelector("input");
+      cb.addEventListener("change", () => {
+        const on = cb.checked;
+        _indivToku[ymd] = on;
+        const alertEl = tr.cells[0] ? tr.cells[0].querySelector(".toku-alert") : null;
+        if (alertEl) alertEl.style.display = on ? "none" : "";
+        tokuCell.classList.add("saving");
+        saveDayToku(_indivStaffFull, ymd, on)
+          .then(() => { tokuCell.classList.remove("saving"); })
+          .catch(() => { tokuCell.classList.remove("saving"); cb.checked = !on; _indivToku[ymd] = !on;
+            if (alertEl) alertEl.style.display = (!on) ? "none" : "";
+            alert("特出の保存に失敗しました。時間をおいて再度お試しください。"); });
+      });
+    }
   });
   updateNotesSaveBtn();
 
