@@ -273,7 +273,7 @@ tr.row-extra > td.loc-bunin, tr.row-rest > td.loc-bunin, tr.row-bunin-anom > td.
 tr.row-extra > td.loc-rest,  tr.row-rest > td.loc-rest,  tr.row-bunin-anom > td.loc-rest  { background:#e0e0e0; }
 tr.row-extra > td.time-flag, tr.row-rest > td.time-flag, tr.row-bunin-anom > td.time-flag { background:#fff59d; }
 /* 「特出?」「休み?」「分院→本院?」アラートを行の枠外(左側余白)に配置し、行幅・行高を変えない。 */
-.table-wrap:has(#tbl-combined) { padding-left: 66px; }
+.table-wrap:has(#tbl-combined) { padding-left: 66px; max-height: 78vh; overflow: auto; }
 #tbl-combined tbody td:first-child { position: relative; }
 .toku-alert, .rest-alert, .bunin-alert {
   position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
@@ -342,10 +342,10 @@ td.saving { opacity:0.5; }
 .weekday-grid .wd-body { padding: 5px 0; min-height: 22px; }
 .weekday-grid .wd-body.worked { background:#c8e6c9; font-weight:bold; }
 .weekday-grid .wd-body.off { color:#bbb; }
-/* 正規の出勤曜日(勤務形態マスタのマトリクス等)は赤枠で強調 */
-.weekday-grid .wd-cell.wd-regular { box-shadow: inset 0 0 0 2px #d32f2f; position: relative; z-index: 1; }
-/* 個人別勤務記録: 正規の出勤曜日の行は行全体を赤枠で囲う */
-#tbl-combined tbody tr.row-regular { outline: 2px solid #d32f2f; outline-offset: -2px; }
+/* 正規の出勤曜日(勤務形態マスタのマトリクス等)は 曜日を赤字太字で強調 */
+.weekday-grid .wd-cell.wd-regular .wd-head { color:#d32f2f !important; }
+/* 個人別勤務記録: 正規の出勤曜日の行は 日付・曜日 を赤字太字で強調 */
+#tbl-combined tbody tr.row-regular > td:first-child { color:#d32f2f; font-weight:bold; }
 
 /* 土日出勤手当 */
 .weekend-allowance {
@@ -2061,6 +2061,10 @@ const DAY_FLAG_DEFS = [
   { key: "分本",    label: "分→本",   col: 16 },
 ];
 function flagSuffix(key) { return "|" + key; }
+// 排他グループ: 一方をONにすると相方をOFFにする(特出⇔交代出勤 / 交代休⇔休暇)
+const DAY_FLAG_EXCLUSIVE = { "特出": "交代出勤", "交代出勤": "特出", "交代休": "休暇", "休暇": "交代休" };
+// 集計に影響するフラグ(変更時は表を再計算): 特出=特出時間の計上 / 分本=定時変更
+function dayFlagIsCalc(key) { return key === "特出" || key === "分本"; }
 
 // 日次備考: 指定スタッフ(コード付きタブ名)の生ノート辞書を取得
 //   { "2026/06/01":"備考", "2026/06/01|特出":"1", ... }
@@ -2884,25 +2888,36 @@ function renderCombinedTable() {
       if (!fcell) return;
       fcell.innerHTML = '<input type="checkbox" class="flag-check"' + (dayFlagOn(f.key, ymd) ? " checked" : "") + '>';
       const cb = fcell.querySelector("input");
-      // 「特出」(特出時間の計上)と「分→本」(定時変更)は集計に影響するため再計算する
-      const affectsCalc = (f.key === "特出" || f.key === "分本");
       cb.addEventListener("change", () => {
         const on = cb.checked;
         setDayFlagState(f.key, ymd, on);
+        // 排他: ONにしたら相方をOFFにする(特出⇔交代出勤 / 交代休⇔休暇)
+        const partner = (on && DAY_FLAG_EXCLUSIVE[f.key] && dayFlagOn(DAY_FLAG_EXCLUSIVE[f.key], ymd))
+          ? DAY_FLAG_EXCLUSIVE[f.key] : null;
+        if (partner) setDayFlagState(partner, ymd, false);
         refreshRowAlerts(tr, ymd);
+        const rerender = dayFlagIsCalc(f.key) || (partner && dayFlagIsCalc(partner));
+        // 相方のチェックをDOMに反映(再計算しない場合)
+        if (partner && !rerender) {
+          const pdef = DAY_FLAG_DEFS.find(x => x.key === partner);
+          const pcb = pdef && tr.cells[pdef.col] && tr.cells[pdef.col].querySelector("input");
+          if (pcb) pcb.checked = false;
+        }
+        const saves = [saveDayFlag(_indivStaffFull, ymd, f.key, on)];
+        if (partner) saves.push(saveDayFlag(_indivStaffFull, ymd, partner, false));
         const failed = () => {
           setDayFlagState(f.key, ymd, !on);
+          if (partner) setDayFlagState(partner, ymd, true);
           alert(f.label + "の保存に失敗しました。時間をおいて再度お試しください。");
-          if (affectsCalc) rerenderCombinedPreserveNotes();
-          else { cb.checked = !on; refreshRowAlerts(tr, ymd); }
+          rerenderCombinedPreserveNotes();
         };
-        if (affectsCalc) {
+        if (rerender) {
           // 残業/特出/定時が変わるため即時に表を再計算(備考の未保存は保持)
           rerenderCombinedPreserveNotes();
-          saveDayFlag(_indivStaffFull, ymd, f.key, on).catch(failed);
+          Promise.all(saves).catch(failed);
         } else {
           fcell.classList.add("saving");
-          saveDayFlag(_indivStaffFull, ymd, f.key, on)
+          Promise.all(saves)
             .then(() => { fcell.classList.remove("saving"); })
             .catch(() => { fcell.classList.remove("saving"); failed(); });
         }
