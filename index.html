@@ -262,21 +262,25 @@
 .loc-honin { background:#ffd6e3; }   /* 本院: ピンク */
 .loc-bunin { background:#cce8ff; }   /* 分院: 水色 */
 .loc-rest  { background:#e0e0e0; color:#666; }  /* 休み: グレー */
-/* 本来の出勤日以外に出勤した日: 行全体を薄い緑色で強調 */
-tr.row-extra > td { background:#d7f0d7; }
-tr.row-extra > td.loc-honin { background:#ffd6e3; }  /* 勤務地セルの色分けは維持 */
-tr.row-extra > td.loc-bunin { background:#cce8ff; }
-tr.row-extra > td.loc-rest  { background:#e0e0e0; }
-tr.row-extra > td.time-flag { background:#fff59d; }  /* 遅刻/早退の強調も維持 */
-/* 「特出?」アラートを行の枠外(左側の余白)に配置し、行幅・行高を変えない。 */
+/* 行全体の強調背景: 緑=本来以外の出勤 / オレンジ=本来の出勤曜日に休み / 紫=分院なしパターン×分院→本院 */
+tr.row-extra      > td { background:#d7f0d7; }  /* 薄い緑 */
+tr.row-rest       > td { background:#ffe0b2; }  /* 薄いオレンジ */
+tr.row-bunin-anom > td { background:#e1bee7; }  /* 紫 */
+/* 勤務地セルの色分け・遅刻/早退の強調は、行の強調背景より優先して維持する */
+tr.row-extra > td.loc-honin, tr.row-rest > td.loc-honin, tr.row-bunin-anom > td.loc-honin { background:#ffd6e3; }
+tr.row-extra > td.loc-bunin, tr.row-rest > td.loc-bunin, tr.row-bunin-anom > td.loc-bunin { background:#cce8ff; }
+tr.row-extra > td.loc-rest,  tr.row-rest > td.loc-rest,  tr.row-bunin-anom > td.loc-rest  { background:#e0e0e0; }
+tr.row-extra > td.time-flag, tr.row-rest > td.time-flag, tr.row-bunin-anom > td.time-flag { background:#fff59d; }
+/* 「特出?」「休み?」アラートを行の枠外(左側の余白)に配置し、行幅・行高を変えない。 */
 .table-wrap:has(#tbl-combined) { padding-left: 44px; }
-tr.row-extra > td:first-child { position: relative; }
-.toku-alert {
+#tbl-combined tbody td:first-child { position: relative; }
+.toku-alert, .rest-alert {
   position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
-  margin-right: 5px; white-space: nowrap;
-  color:#d32f2f; font-weight:bold; font-size:11px;
+  margin-right: 5px; white-space: nowrap; font-weight: bold; font-size: 11px;
 }
-/* 「本院→分院」は文字数が多いので小さめ表示にして列幅を広げない */
+.toku-alert { color:#d32f2f; }  /* 特出?: 赤 */
+.rest-alert { color:#e65100; }  /* 休み?: 橙 */
+/* 「本院→分院」等は文字数が多いので小さめ表示にして列幅を広げない */
 .loc-move { font-size:10px; letter-spacing:-0.5px; white-space:nowrap; }
 /* 特出チェックボックス列 */
 .toku-check { width:18px; height:18px; cursor:pointer; }
@@ -2456,6 +2460,26 @@ function renderMonthTabs() {
   });
 }
 
+// 出退勤時刻を「H:MM」表記に統一する。24時以降(24:12 等)も保持する。
+//   ・"24:12:00" や "9:13:00" → 秒以降を捨てて "24:12" / "9:13"
+//   ・時刻シリアル値(1日の端数。24時超は 1 以上) → 時:分へ換算(24:12 等を保持)
+//   ・"9:13" 等は変更なし
+function fmtClock(v) {
+  if (v === null || v === undefined) return "";
+  let s = String(v).trim();
+  if (s === "") return "";
+  const m = s.match(/(\d{1,3}):(\d{2})/);            // 先頭の 時:分 を採用(秒は捨てる)
+  if (m) return parseInt(m[1], 10) + ":" + m[2];
+  if (/^\d*\.?\d+$/.test(s)) {                        // 数値(時刻シリアル)。48h未満のみ換算
+    const num = parseFloat(s);
+    if (num >= 0 && num < 2) {
+      const total = Math.round(num * 24 * 60);
+      return Math.floor(total / 60) + ":" + String(((total % 60) + 60) % 60).padStart(2, "0");
+    }
+  }
+  return s;
+}
+
 function renderCombinedTable() {
   if (!_indivGrouped || !_indivCurrentYear || !_indivCurrentMonth) return;
   const yearData = _indivGrouped[_indivCurrentYear] || {};
@@ -2475,31 +2499,41 @@ function renderCombinedTable() {
   const variant = !!(pat && pat.kind === "変則");
   let dispOverMin = 0, dispSpecMin = 0;  // 表示中の残業/特出の月合計(分)
 
-  // 「本来の出勤日以外に出勤している日」を薄い緑色で強調するための準備
-  //   ① 出勤パターンの登録がある人 → 登録曜日(pat.days)以外に出勤した日
-  //   ② 登録が無い人 → 出勤曜日カウントが5番目以降(=不定期)の曜日に出勤した日
+  // 曜日ごとの出勤回数を集計(緑=本来以外の出勤 / オレンジ=本来休んだ日 の判定に使う)
   const hasPattern = !!(pat && pat.days && Object.keys(pat.days).length);
-  let extraWeekdaySet = null;
-  if (!hasPattern) {
-    const wdCnt = {};
-    rows.forEach(r => {
-      const ds = String(r[idx.date] || "");
-      if (ds.indexOf("合計") >= 0) return;
-      const w = (ds.match(/\((.)\)/) || [])[1];
-      if (!w) return;
-      const lc = String(r[idx.loc] || "");
-      if (lc === "本院" || lc === "分院") wdCnt[w] = (wdCnt[w] || 0) + 1;
-    });
-    // 出勤日数の多い曜日順に並べ、5番目以降の曜日を「本来以外」とみなす
+  const wdCnt = {};
+  rows.forEach(r => {
+    const ds = String(r[idx.date] || "");
+    if (ds.indexOf("合計") >= 0) return;
+    const w = (ds.match(/\((.)\)/) || [])[1];
+    if (!w) return;
+    const lc = String(r[idx.loc] || "");
+    const am = Math.round((parseTime(r[idx.work]) || 0) * 60);
+    const wkd = variant ? (am > 0) : (lc === "本院" || lc === "分院");
+    if (wkd) wdCnt[w] = (wdCnt[w] || 0) + 1;
+  });
+
+  // 「本来の出勤日」= パターン登録者は登録曜日 / 未登録者は出勤回数の多い上位4曜日
+  //   ・緑(row-extra): 本来以外の曜日に出勤した日
+  //   ・オレンジ(row-rest): 本来の出勤曜日なのに休んでいる日(他の週は出勤している)
+  let extraWeekdaySet = null, regularWeekdaySet = null;
+  if (hasPattern) {
+    regularWeekdaySet = new Set(Object.keys(pat.days));
+  } else {
     const ranked = Object.keys(wdCnt).sort((a, b) => wdCnt[b] - wdCnt[a]);
-    extraWeekdaySet = new Set(ranked.slice(4));
+    extraWeekdaySet = new Set(ranked.slice(4));    // 5番目以降 = 本来以外
+    regularWeekdaySet = new Set(ranked.slice(0, 4)); // 上位4曜日 = 本来の出勤曜日
   }
+  // 割当パターンの勤務地に「分院」が含まれないか(紫=分院→本院 の異常判定に使う)
+  const patNoBunin = !!pat && !wpPatternHasBunin(pat);
 
   const _today = new Date(); _today.setHours(0, 0, 0, 0);
   const rowKeys = [];   // 各行の年月日キー (備考入力用。合計/不正行は null)
   const rowLate = [];   // 遅刻(出勤セルを強調)
   const rowEarly = [];  // 早退(退勤セルを強調)
   const rowExtra = [];  // 本来の出勤日以外に出勤(行を薄い緑色で強調)
+  const rowRest = [];   // 本来の出勤曜日なのに休み(行を薄いオレンジで強調)
+  const rowPurple = []; // 分院なしパターンなのに 分院→本院(行を紫で強調)
 
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2509,8 +2543,8 @@ function renderCombinedTable() {
     let specStr = r[idx.spec] || "";
     let punchStr = "";
     let ymd = null;
-    let late = false, early = false, extra = false;
-    let dispLoc = r[idx.loc] || "";   // 出勤場所の表示値(条件により本院→分院に読み替え)
+    let late = false, early = false, extra = false, rest = false, purple = false;
+    let dispLoc = r[idx.loc] || "";   // 出勤場所の表示値(条件により本院⇄分院に読み替え)
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
@@ -2571,14 +2605,14 @@ function renderCombinedTable() {
         if (schedEnd != null && clockOut != null && clockOut < schedEnd) early = true;
       }
 
-      // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら
-      //   「本院→分院」と表示(本院から分院への場所移動があったことを示す)。
+      // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら場所移動と判断し、
+      //   本院→分院 / 分院→本院 と表示(記録上の勤務地から他院へ移動したことを示す)。
       //   表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま。
-      if (loc === "本院" && clockIn != null && clockIn <= 510 && clockOut != null && clockOut >= 1170) {
-        dispLoc = "本院→分院";
-      }
+      const earlyLate = clockIn != null && clockIn <= 510 && clockOut != null && clockOut >= 1170;
+      if (earlyLate && loc === "本院") dispLoc = "本院→分院";
+      else if (earlyLate && loc === "分院") dispLoc = "分院→本院";
 
-      // 本来の出勤日以外に出勤しているか判定
+      // 本来の出勤日以外に出勤しているか判定(緑)
       if (worked && wd) {
         if (hasPattern) {
           if (!(pat.days || {})[wd]) extra = true;              // ① 登録曜日以外に出勤
@@ -2586,6 +2620,15 @@ function renderCombinedTable() {
           extra = true;                                          // ② 5番目以降の曜日に出勤
         }
       }
+
+      // 本来は出勤曜日なのに休んでいる日(オレンジ)。他の週は出勤している曜日のみ。
+      if (!worked && wd && dayDate <= _today &&
+          regularWeekdaySet && regularWeekdaySet.has(wd) && (wdCnt[wd] || 0) >= 1) {
+        rest = true;
+      }
+
+      // 分院を含まないパターンなのに「分院→本院」になっている日(紫)
+      if (patNoBunin && dispLoc === "分院→本院") purple = true;
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
       overStr = "__TOTAL_OVER__"; specStr = "__TOTAL_SPEC__";
@@ -2594,11 +2637,13 @@ function renderCombinedTable() {
     rowLate.push(late);
     rowEarly.push(early);
     rowExtra.push(extra);
+    rowRest.push(rest);
+    rowPurple.push(purple);
     return [
       r[idx.date] || "",
       r[idx.kb] || "",
-      r[idx.in] || "",
-      r[idx.out] || "",
+      fmtClock(r[idx.in]),
+      fmtClock(r[idx.out]),
       r[idx.work] || "",
       punchStr,
       dispLoc,
@@ -2627,6 +2672,7 @@ function renderCombinedTable() {
     if (col === 6) {
       if (val === "本院") return "loc-honin";
       if (val === "本院→分院") return "loc-bunin loc-move";  // 場所移動: 幅を変えないよう小さめ表示
+      if (val === "分院→本院") return "loc-honin loc-move";
       if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
@@ -2643,8 +2689,10 @@ function renderCombinedTable() {
   const tbl = document.getElementById("tbl-combined");
   const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
   bodyRows.forEach((tr, i) => {
-    // 本来の出勤日以外に出勤 → 行を薄い緑色で強調
-    if (rowExtra[i]) tr.classList.add("row-extra");
+    // 行の背景強調(優先度: 紫 > 緑 > オレンジ)
+    if (rowPurple[i]) tr.classList.add("row-bunin-anom");       // 分院なしパターン×分院→本院
+    else if (rowExtra[i]) tr.classList.add("row-extra");        // 本来以外の出勤(緑)
+    else if (rowRest[i]) tr.classList.add("row-rest");          // 本来の出勤曜日に休み(オレンジ)
     // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
     if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
     if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
@@ -2659,13 +2707,18 @@ function renderCombinedTable() {
     // 入力したら「未保存」マーク。保存は「備考を保存」ボタンで明示的に行う
     inp.addEventListener("input", () => { inp.classList.add("dirty"); inp.classList.remove("saved", "save-error"); markNotesDirty(); });
 
-    // 薄い緑色の行 → 左端(日付セル)に赤字太字アラート「特出?」を表示
+    // 左端(枠外)のアラート: 緑行=「特出?」(赤) / オレンジ行=「休み?」(橙)
     const checked = !!_indivToku[ymd];
-    if (rowExtra[i] && tr.cells[0]) {
+    if (!rowPurple[i] && rowExtra[i] && tr.cells[0]) {
       const al = document.createElement("span");
       al.className = "toku-alert";
       al.textContent = "特出?";
       if (checked) al.style.display = "none";  // 特出✓済みならアラート非表示
+      tr.cells[0].appendChild(al);
+    } else if (rowRest[i] && tr.cells[0]) {
+      const al = document.createElement("span");
+      al.className = "rest-alert";
+      al.textContent = "休み?";
       tr.cells[0].appendChild(al);
     }
 
@@ -3403,6 +3456,18 @@ function wpPatternForStaff(name) {
   const id = _wpData.assignments[wpStripName(name)];
   if (!id) return null;
   return (_wpData.patterns || []).find(p => p.id === id) || null;
+}
+
+// パターンの勤務地に「分院」が含まれるか(変則は各曜日の4要素目=勤務地で判定)
+function wpPatternHasBunin(pat) {
+  if (!pat) return false;
+  if (pat.id === "分院" || pat.id === "移動") return true;  // 定時: 分院 / 移動(分院を含む)
+  if (pat.id === "本院") return false;
+  const days = pat.days || {};
+  return Object.keys(days).some(wd => {
+    const e = days[wd];
+    return Array.isArray(e) && e.length > 3 && String(e[3]).indexOf("分院") >= 0;
+  });
 }
 
 // パターンの指定曜日の所定勤務(分)。無ければ null
