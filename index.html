@@ -280,7 +280,7 @@ tr.row-extra > td.time-flag, tr.row-rest > td.time-flag, tr.row-bunin-anom > td.
 }
 .toku-alert { color:#d32f2f; }  /* 特出?: 赤 */
 .rest-alert { color:#e65100; }  /* 休み?: 橙 */
-/* 「本院→分院」等は文字数が多いので小さめ表示にして列幅を広げない */
+/* 「分院→本院」等は文字数が多いので小さめ表示にして列幅を広げない */
 .loc-move { font-size:10px; letter-spacing:-0.5px; white-space:nowrap; }
 /* 特出チェックボックス列 */
 .toku-check { width:18px; height:18px; cursor:pointer; }
@@ -2653,11 +2653,10 @@ function renderCombinedTable() {
       }
 
       // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら場所移動と判断し、
-      //   本院→分院 / 分院→本院 と表示(記録上の勤務地から他院へ移動したことを示す)。
+      //   「分院→本院」と表示(AM分院→PM本院。記録上の勤務地に関わらず移動を示す)。
       //   表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま。
       const earlyLate = clockIn != null && clockIn <= 510 && clockOut != null && clockOut >= 1170;
-      if (earlyLate && loc === "本院") dispLoc = "本院→分院";
-      else if (earlyLate && loc === "分院") dispLoc = "分院→本院";
+      if (earlyLate && (loc === "本院" || loc === "分院")) dispLoc = "分院→本院";
 
       // 本来の出勤日以外に出勤しているか判定(緑)
       if (worked && wd) {
@@ -2722,8 +2721,7 @@ function renderCombinedTable() {
     // 出勤場所列 (6): 本院/分院/休み の色分け
     if (col === 6) {
       if (val === "本院") return "loc-honin";
-      if (val === "本院→分院") return "loc-bunin loc-move";  // 場所移動: 幅を変えないよう小さめ表示
-      if (val === "分院→本院") return "loc-honin loc-move";
+      if (val === "分院→本院") return "loc-honin loc-move";  // 場所移動: 幅を変えないよう小さめ表示
       if (val === "分院") return "loc-bunin";
       if (val === "休み") return "loc-rest";
     }
