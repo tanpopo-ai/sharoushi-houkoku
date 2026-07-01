@@ -2571,8 +2571,9 @@ function renderCombinedTable() {
     extraWeekdaySet = new Set(ranked.slice(4));    // 5番目以降 = 本来以外
     regularWeekdaySet = new Set(ranked.slice(0, 4)); // 上位4曜日 = 本来の出勤曜日
   }
-  // 割当パターンの勤務地に「分院」が含まれないか(紫=分院→本院 の異常判定に使う)
-  const patNoBunin = !!pat && !wpPatternHasBunin(pat);
+  // 勤務地に「分院」が含まれないか(紫=分院→本院 の異常判定に使う)。
+  //   未割当スタッフは既定=本院標準(分院なし)とみなすため、pat が無くても対象にする。
+  const patNoBunin = !wpPatternHasBunin(pat);
 
   const _today = new Date(); _today.setHours(0, 0, 0, 0);
   const rowKeys = [];   // 各行の年月日キー (備考入力用。合計/不正行は null)
