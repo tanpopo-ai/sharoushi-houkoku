@@ -271,19 +271,21 @@ tr.row-extra > td.loc-honin, tr.row-rest > td.loc-honin, tr.row-bunin-anom > td.
 tr.row-extra > td.loc-bunin, tr.row-rest > td.loc-bunin, tr.row-bunin-anom > td.loc-bunin { background:#cce8ff; }
 tr.row-extra > td.loc-rest,  tr.row-rest > td.loc-rest,  tr.row-bunin-anom > td.loc-rest  { background:#e0e0e0; }
 tr.row-extra > td.time-flag, tr.row-rest > td.time-flag, tr.row-bunin-anom > td.time-flag { background:#fff59d; }
-/* 「特出?」「休み?」アラートを行の枠外(左側の余白)に配置し、行幅・行高を変えない。 */
-.table-wrap:has(#tbl-combined) { padding-left: 44px; }
+/* 「特出?」「休み?」「分院→本院?」アラートを行の枠外(左側余白)に配置し、行幅・行高を変えない。 */
+.table-wrap:has(#tbl-combined) { padding-left: 66px; }
 #tbl-combined tbody td:first-child { position: relative; }
-.toku-alert, .rest-alert {
+.toku-alert, .rest-alert, .bunin-alert {
   position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
-  margin-right: 5px; white-space: nowrap; font-weight: bold; font-size: 11px;
+  margin-right: 5px; white-space: nowrap; font-weight: bold;
 }
-.toku-alert { color:#d32f2f; }  /* 特出?: 赤 */
-.rest-alert { color:#e65100; }  /* 休み?: 橙 */
+.toku-alert { color:#d32f2f; font-size:11px; }  /* 特出?: 赤 */
+.rest-alert { color:#e65100; font-size:11px; }  /* 休み?: 橙 */
+.bunin-alert { color:#8e24aa; font-size:10px; letter-spacing:-0.5px; }  /* 分院→本院?: 紫 */
 /* 「分院→本院」等は文字数が多いので小さめ表示にして列幅を広げない */
 .loc-move { font-size:10px; letter-spacing:-0.5px; white-space:nowrap; }
-/* 特出チェックボックス列 */
-.toku-check { width:18px; height:18px; cursor:pointer; }
+/* フラグ用チェックボックス列(特出/交代出勤/交代休/休暇/分→本 = 13〜17列目)は中央寄せ */
+#tbl-combined th:nth-child(n+13), #tbl-combined td:nth-child(n+13) { text-align:center; }
+#tbl-combined .flag-check { width:16px; height:16px; cursor:pointer; }
 td.saving { opacity:0.5; }
 
 /* 託児利用バッジ (名前のすぐ右) */
@@ -2043,36 +2045,57 @@ function callApiPost(action, bodyObj) {
     .then(data => { if (data.error) throw new Error(data.error); return data; });
 }
 
-// 特出チェックの保存キー。既存の備考保存(set_day_note)をそのまま使うため、
-// 年月日に接尾辞を付けた別キーで保存する(バックエンド改修・再デプロイ不要)。
-const TOKU_SUFFIX = "|特出";
-function tokuKey(ymd) { return ymd + TOKU_SUFFIX; }
+// 日次フラグ(チェックボックス)定義。既存の備考保存(set_day_note)をそのまま使うため、
+// 年月日に接尾辞(|キー)を付けた別キーで保存する(バックエンド改修・再デプロイ不要)。
+//   col = 統合表での列番号(0起点)。特出=12 の右へ順に配置。
+const DAY_FLAG_DEFS = [
+  { key: "特出",    label: "特出",    col: 12 },
+  { key: "交代出勤", label: "交代出勤", col: 13 },
+  { key: "交代休",  label: "交代休",  col: 14 },
+  { key: "休暇",    label: "休暇",    col: 15 },
+  { key: "分本",    label: "分→本",   col: 16 },
+];
+function flagSuffix(key) { return "|" + key; }
 
 // 日次備考: 指定スタッフ(コード付きタブ名)の生ノート辞書を取得
 //   { "2026/06/01":"備考", "2026/06/01|特出":"1", ... }
 function loadDayNotes(name) {
   return callApi("day_notes", { name: name }).then(d => d.notes || {}).catch(() => ({}));
 }
-// 生ノート辞書から 備考マップ と 特出マップ を分離する
+// 生ノート辞書から 備考マップ と 各フラグマップ を分離する
+//   returns { notes:{ymd:text}, flags:{ 特出:{ymd:true}, 交代出勤:{...}, ... } }
 function splitDayNotes(raw) {
-  const notes = {}, toku = {};
+  const notes = {};
+  const flags = {};
+  DAY_FLAG_DEFS.forEach(f => { flags[f.key] = {}; });
   Object.keys(raw || {}).forEach(k => {
-    if (k.slice(-TOKU_SUFFIX.length) === TOKU_SUFFIX) {
-      const base = k.slice(0, -TOKU_SUFFIX.length);
-      if (String(raw[k]).trim() === "1") toku[base] = true;
+    let matched = null;
+    for (const f of DAY_FLAG_DEFS) {
+      const suf = flagSuffix(f.key);
+      if (k.slice(-suf.length) === suf) { matched = f; break; }
+    }
+    if (matched) {
+      const base = k.slice(0, -flagSuffix(matched.key).length);
+      if (String(raw[k]).trim() === "1") flags[matched.key][base] = true;
     } else {
       notes[k] = raw[k];
     }
   });
-  return { notes: notes, toku: toku };
+  return { notes: notes, flags: flags };
 }
 // 日次備考: 1日分を保存
 function saveDayNote(name, ymd, text) {
   return callApi("set_day_note", { name: name, ymd: ymd, text: text });
 }
-// 特出チェック: 1日分を保存(✓=1 / 解除="") — 備考保存の仕組みを流用
-function saveDayToku(name, ymd, on) {
-  return callApi("set_day_note", { name: name, ymd: tokuKey(ymd), text: on ? "1" : "" });
+// 日次フラグ: 1日分を保存(✓=1 / 解除="") — 備考保存の仕組みを流用
+function saveDayFlag(name, ymd, key, on) {
+  return callApi("set_day_note", { name: name, ymd: ymd + flagSuffix(key), text: on ? "1" : "" });
+}
+// 空のフラグマップ一式を生成
+function emptyDayFlags() {
+  const o = {};
+  DAY_FLAG_DEFS.forEach(f => { o[f.key] = {}; });
+  return o;
 }
 
 // 備考: 保存ボタンの表示制御・未保存件数の表示・一括保存
@@ -2294,7 +2317,7 @@ let _indivColIdx = null;  // 列インデックスのキャッシュ
 let _indivStaffName = ""; // 選択中スタッフの氏名 (コード抜き、託児データ突合用)
 let _indivStaffFull = ""; // 選択中スタッフのタブ名 (コード付き・備考保存キー)
 let _indivNotes = {};     // { "2026/06/01": "備考テキスト" }
-let _indivToku = {};      // { "2026/06/01": true } 特出チェック
+let _indivFlags = emptyDayFlags();  // { 特出:{ymd:true}, 交代出勤:{}, 交代休:{}, 休暇:{}, 分本:{} }
 
 // 氏名の正規化 (空白除去) — 託児フォームと勤怠で表記揺れがあっても突合できるように
 function normNameForMatch(s) {
@@ -2366,12 +2389,12 @@ function renderIndivData(data) {
   // 備考保存用にフルのタブ名(コード付き)も保持し、当該スタッフの備考を読み込む
   _indivStaffFull = String(data.name || "");
   _indivNotes = {};
-  _indivToku = {};
+  _indivFlags = emptyDayFlags();
   if (typeof loadDayNotes === "function") {
     loadDayNotes(_indivStaffFull).then(raw => {
       const split = splitDayNotes(raw);
       _indivNotes = split.notes;
-      _indivToku = split.toku;
+      _indivFlags = split.flags;
       if (_indivGrouped) renderCombinedTable();
     });
   }
@@ -2527,6 +2550,38 @@ function fmtClock(v) {
   return s;
 }
 
+// 日次フラグの状態参照・更新
+function dayFlagOn(key, ymd) { return !!(_indivFlags[key] && _indivFlags[key][ymd]); }
+function setDayFlagState(key, ymd, on) {
+  if (!_indivFlags[key]) _indivFlags[key] = {};
+  if (on) _indivFlags[key][ymd] = true; else delete _indivFlags[key][ymd];
+}
+// 行の枠外アラートの表示/非表示を、現在のフラグ状態から更新する
+//   特出? … 特出 or 交代出勤 で消える
+//   休み? … 交代休 or 休暇 で消える
+//   分院→本院? … 分本 で消える
+function refreshRowAlerts(tr, ymd) {
+  const ta = tr.querySelector(".toku-alert");
+  if (ta) ta.style.display = (dayFlagOn("特出", ymd) || dayFlagOn("交代出勤", ymd)) ? "none" : "";
+  const ra = tr.querySelector(".rest-alert");
+  if (ra) ra.style.display = (dayFlagOn("交代休", ymd) || dayFlagOn("休暇", ymd)) ? "none" : "";
+  const ba = tr.querySelector(".bunin-alert");
+  if (ba) ba.style.display = dayFlagOn("分本", ymd) ? "none" : "";
+}
+// 統合表を再描画するが、未保存の備考入力(値・未保存マーク)は保持する
+function rerenderCombinedPreserveNotes() {
+  const snap = {};
+  document.querySelectorAll("#tbl-combined .note-input").forEach(inp => {
+    snap[inp.getAttribute("data-ymd")] = { v: inp.value, dirty: inp.classList.contains("dirty") };
+  });
+  renderCombinedTable();
+  document.querySelectorAll("#tbl-combined .note-input").forEach(inp => {
+    const s = snap[inp.getAttribute("data-ymd")];
+    if (s) { inp.value = s.v; if (s.dirty) inp.classList.add("dirty"); }
+  });
+  if (typeof markNotesDirty === "function") markNotesDirty();
+}
+
 function renderCombinedTable() {
   if (!_indivGrouped || !_indivCurrentYear || !_indivCurrentMonth) return;
   const yearData = _indivGrouped[_indivCurrentYear] || {};
@@ -2537,7 +2592,8 @@ function renderCombinedTable() {
   // 統合表:
   //  0日付 1休日区分 2出勤 3退勤 4実労働 5打刻 6出勤場所 7休暇 8残業 9特出 10託児 11備考
   const headers = ["日付", "休日区分", "出勤時刻", "退勤時刻", "実労働時間",
-                   "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考", "特出"];
+                   "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考",
+                   "特出", "交代出勤", "交代休", "休暇", "分→本"];
   let careMonthTotal = 0;
 
   // 残業/特出は「退勤 − 定時終了」で全スタッフ再計算する(早出は含めない・休憩の二重控除なし)
@@ -2629,6 +2685,11 @@ function renderCombinedTable() {
         schedEnd = (typeof wpStandardEndMin === "function") ? wpStandardEndMin(loc, wd) : null;
       }
 
+      // 「分→本」チェックがある日は、その日の定時を 8:30(510)〜19:30(1170)に上書き
+      if (_indivFlags["分本"] && _indivFlags["分本"][ymd]) {
+        schedStart = 510; schedEnd = 1170; unscheduledVariant = false;
+      }
+
       // 残業 = 「定時終了より後に退勤した分(退勤 − 定時終了)」。早出は含めない/休憩は二重控除しない。
       let otMin = null;  // null = 再計算せずジョブカン値を維持
       if (variant) {
@@ -2712,6 +2773,10 @@ function renderCombinedTable() {
       careStr,
       "",  // 備考: 後でinput注入
       "",  // 特出: 後でcheckbox注入
+      "",  // 交代出勤
+      "",  // 交代休
+      "",  // 休暇
+      "",  // 分→本
     ];
   });
 
@@ -2748,7 +2813,7 @@ function renderCombinedTable() {
     return "";
   });
 
-  // 備考列(最右)に編集可能な入力を注入 + 遅刻/早退セルの強調
+  // 備考入力の注入 + 遅刻/早退セルの強調 + 枠外アラート + フラグ用チェックボックス
   const tbl = document.getElementById("tbl-combined");
   const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
   bodyRows.forEach((tr, i) => {
@@ -2759,49 +2824,61 @@ function renderCombinedTable() {
     // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
     if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
     if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
+
     const ymd = rowKeys[i];
-    const cell = tr.cells[11];
-    const tokuCell = tr.cells[12];
+    const cell = tr.cells[11];  // 備考
     if (!cell) return;
-    if (!ymd) { cell.textContent = ""; if (tokuCell) tokuCell.textContent = ""; return; }
+    if (!ymd) {  // 合計行など: 備考・フラグ列を空に
+      cell.textContent = "";
+      DAY_FLAG_DEFS.forEach(f => { if (tr.cells[f.col]) tr.cells[f.col].textContent = ""; });
+      return;
+    }
+
+    // 備考入力
     const val = _indivNotes[ymd] || "";
     cell.innerHTML = '<input class="note-input" data-ymd="' + ymd + '" value="' + escapeHtml(val) + '" placeholder="メモ">';
     const inp = cell.querySelector("input");
-    // 入力したら「未保存」マーク。保存は「備考を保存」ボタンで明示的に行う
     inp.addEventListener("input", () => { inp.classList.add("dirty"); inp.classList.remove("saved", "save-error"); markNotesDirty(); });
 
-    // 左端(枠外)のアラート: 緑行=「特出?」(赤) / オレンジ行=「休み?」(橙)
-    const checked = !!_indivToku[ymd];
-    if (!rowPurple[i] && rowExtra[i] && tr.cells[0]) {
-      const al = document.createElement("span");
-      al.className = "toku-alert";
-      al.textContent = "特出?";
-      if (checked) al.style.display = "none";  // 特出✓済みならアラート非表示
-      tr.cells[0].appendChild(al);
-    } else if (rowRest[i] && tr.cells[0]) {
-      const al = document.createElement("span");
-      al.className = "rest-alert";
-      al.textContent = "休み?";
-      tr.cells[0].appendChild(al);
+    // 左端(枠外)アラート: 緑=「特出?」/ オレンジ=「休み?」/ 紫=「分院→本院?」
+    if (tr.cells[0]) {
+      let al = null;
+      if (rowPurple[i]) { al = document.createElement("span"); al.className = "bunin-alert"; al.textContent = "分院→本院?"; }
+      else if (rowExtra[i]) { al = document.createElement("span"); al.className = "toku-alert"; al.textContent = "特出?"; }
+      else if (rowRest[i]) { al = document.createElement("span"); al.className = "rest-alert"; al.textContent = "休み?"; }
+      if (al) tr.cells[0].appendChild(al);
+      refreshRowAlerts(tr, ymd);  // 既にフラグ済みなら非表示
     }
 
-    // 特出チェックボックス(備考の右)。✓でアラートを消す。緑背景は残す。
-    if (tokuCell) {
-      tokuCell.innerHTML = '<input type="checkbox" class="toku-check"' + (checked ? " checked" : "") + '>';
-      const cb = tokuCell.querySelector("input");
+    // フラグ用チェックボックス(特出 / 交代出勤 / 交代休 / 休暇 / 分→本)
+    DAY_FLAG_DEFS.forEach(f => {
+      const fcell = tr.cells[f.col];
+      if (!fcell) return;
+      fcell.innerHTML = '<input type="checkbox" class="flag-check"' + (dayFlagOn(f.key, ymd) ? " checked" : "") + '>';
+      const cb = fcell.querySelector("input");
       cb.addEventListener("change", () => {
         const on = cb.checked;
-        _indivToku[ymd] = on;
-        const alertEl = tr.cells[0] ? tr.cells[0].querySelector(".toku-alert") : null;
-        if (alertEl) alertEl.style.display = on ? "none" : "";
-        tokuCell.classList.add("saving");
-        saveDayToku(_indivStaffFull, ymd, on)
-          .then(() => { tokuCell.classList.remove("saving"); })
-          .catch(() => { tokuCell.classList.remove("saving"); cb.checked = !on; _indivToku[ymd] = !on;
-            if (alertEl) alertEl.style.display = (!on) ? "none" : "";
-            alert("特出の保存に失敗しました。時間をおいて再度お試しください。"); });
+        setDayFlagState(f.key, ymd, on);
+        refreshRowAlerts(tr, ymd);
+        const failed = () => {
+          setDayFlagState(f.key, ymd, !on);
+          alert(f.label + "の保存に失敗しました。時間をおいて再度お試しください。");
+          // 「分→本」は再計算済みなので描画し直し、その他はその場で戻す
+          if (f.key === "分本") rerenderCombinedPreserveNotes();
+          else { cb.checked = !on; refreshRowAlerts(tr, ymd); }
+        };
+        if (f.key === "分本") {
+          // 定時(8:30-19:30)が変わるため即時に表を再計算(備考の未保存は保持)
+          rerenderCombinedPreserveNotes();
+          saveDayFlag(_indivStaffFull, ymd, f.key, on).catch(failed);
+        } else {
+          fcell.classList.add("saving");
+          saveDayFlag(_indivStaffFull, ymd, f.key, on)
+            .then(() => { fcell.classList.remove("saving"); })
+            .catch(() => { fcell.classList.remove("saving"); failed(); });
+        }
       });
-    }
+    });
   });
   updateNotesSaveBtn();
 
