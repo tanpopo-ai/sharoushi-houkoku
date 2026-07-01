@@ -2942,29 +2942,37 @@ function renderIndivExtras(rows, year, month) {
   const sunDays = {};  // 日 -> 出勤したか(boolean) ※全日曜を記録
   let totalWorked = 0; // 当月の出勤日数合計
   let regularDays = 0; // 当月の本来の出勤日数(正規の出勤曜日にあたる日数)
+  let tokuDays = 0;    // 当月の特出日数(特出チェック済みの出勤日)
 
   rows.forEach(r => {
     const dateStr = String(r[idx.date] || "");
     const dm = dateStr.match(/(\d+)\/(\d+)\((.)\)/);  // "06/01(月)"
     if (!dm) return;
+    const mm = parseInt(dm[1], 10);
     const dd = parseInt(dm[2], 10);
     const wd = dm[3];  // 曜日文字
+    const ymd = year + "/" + pad2(mm) + "/" + pad2(dd);
     const loc = String(r[idx.loc] || "");
     const worked = (loc === "本院" || loc === "分院");
     const wi = WD.indexOf(wd);
     if (worked) totalWorked++;
+    if (worked && dayFlagOn("特出", ymd)) tokuDays++;  // 特出日数
     if (worked && wi >= 0) wdWorked[wi]++;  // 曜日グリッドは出勤回数のみ
     if (_indivRegularWd && _indivRegularWd.has(wd)) regularDays++;  // 本来の出勤日数
     if (wd === "土") satDays[dd] = worked;
     if (wd === "日") sunDays[dd] = worked;
   });
 
-  // --- 名前の横: 当月出勤日数 (出勤実績 / 本来の出勤日数) ---
+  // --- 名前の横: 当月出勤日数 (出勤実績[特出は別出し] / 本来の出勤日数) ---
   const daysBadge = document.getElementById("indiv-days-badge");
   if (daysBadge) {
+    // 分子: 通常出勤日数 (+ 特出N) の形。特出があれば「18+特出2」のように別出し。
+    const numer = (tokuDays > 0)
+      ? ((totalWorked - tokuDays) + "+特出" + tokuDays)
+      : ("" + totalWorked);
     daysBadge.textContent = (_indivRegularWd)
-      ? ("当月出勤 " + totalWorked + "/" + regularDays + "日")
-      : ("当月出勤 " + totalWorked + "日");
+      ? ("当月出勤 " + numer + "/" + regularDays + "日")
+      : ("当月出勤 " + numer + "日");
   }
 
   // --- 曜日グリッド HTML (曜日ごとに 見出し+出勤回数 の縦セル) ---
