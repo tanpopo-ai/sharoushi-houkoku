@@ -278,7 +278,7 @@ tr.row-extra > td.time-flag, tr.row-rest > td.time-flag, tr.row-bunin-anom > td.
   position: absolute; right: 100%; top: 50%; transform: translateY(-50%);
   margin-right: 5px; white-space: nowrap; font-weight: bold;
 }
-.toku-alert { color:#d32f2f; font-size:11px; }  /* 特出?: 赤 */
+.toku-alert { color:#d32f2f; font-size:10px; letter-spacing:-0.5px; }  /* 特出?交代?: 赤 */
 .rest-alert { color:#e65100; font-size:11px; }  /* 休み?: 橙 */
 .bunin-alert { color:#8e24aa; font-size:10px; letter-spacing:-0.5px; }  /* 分院→本院?: 紫 */
 /* 「分院→本院」等は文字数が多いので小さめ表示にして列幅を広げない */
@@ -2844,7 +2844,7 @@ function renderCombinedTable() {
     if (tr.cells[0]) {
       let al = null;
       if (rowPurple[i]) { al = document.createElement("span"); al.className = "bunin-alert"; al.textContent = "分院→本院?"; }
-      else if (rowExtra[i]) { al = document.createElement("span"); al.className = "toku-alert"; al.textContent = "特出?"; }
+      else if (rowExtra[i]) { al = document.createElement("span"); al.className = "toku-alert"; al.textContent = "特出?交代?"; }
       else if (rowRest[i]) { al = document.createElement("span"); al.className = "rest-alert"; al.textContent = "休み?"; }
       if (al) tr.cells[0].appendChild(al);
       refreshRowAlerts(tr, ymd);  // 既にフラグ済みなら非表示
@@ -3844,6 +3844,33 @@ function savePatterns() {
     .catch(err => { if (status) { status.textContent = "保存失敗: " + err.message; status.style.color = "#c62828"; } });
 }
 
+// スタッフ割当・出勤曜日マトリクスの自動保存(チェック/割当の変更時に即保存)。
+//   パターン定義(カード)は編集途中の可能性があるため、最後に保存した _wpData.patterns を維持し、
+//   割当と曜日だけを更新して保存する(＝マトリクス操作でパターン編集を巻き込まない)。
+let _wpAutoSaveTimer = null;
+function scheduleAssignAutoSave() {
+  const status = document.getElementById("wp-status");
+  if (status) { status.textContent = "自動保存中..."; status.style.color = "#555"; }
+  if (_wpAutoSaveTimer) clearTimeout(_wpAutoSaveTimer);
+  _wpAutoSaveTimer = setTimeout(doAssignAutoSave, 500);
+}
+function doAssignAutoSave() {
+  _wpAutoSaveTimer = null;
+  const status = document.getElementById("wp-status");
+  const collected = collectWpData();
+  const payload = {
+    patterns: (_wpData && Array.isArray(_wpData.patterns)) ? _wpData.patterns : collected.patterns,
+    assignments: collected.assignments,
+    weekdays: collected.weekdays,
+  };
+  callApiPost("set_work_patterns", payload)
+    .then(() => {
+      _wpData = payload;
+      if (status) { status.textContent = "✓ 自動保存しました(全端末に反映)"; status.style.color = "#2e7d32"; }
+    })
+    .catch(err => { if (status) { status.textContent = "自動保存に失敗: " + err.message + "(「保存」で再試行)"; status.style.color = "#c62828"; } });
+}
+
 function addPattern() {
   const box = document.getElementById("wp-patterns");
   if (!box) return;
@@ -3863,6 +3890,12 @@ function wireWpOnce() {
   if (add) add.addEventListener("click", addPattern);
   const search = document.getElementById("wp-staff-search");
   if (search) search.addEventListener("input", renderAssign);
+  // スタッフ割当・出勤曜日マトリクスは変更時に自動保存(イベント委譲=再描画後も有効)
+  const assignTbl = document.getElementById("wp-assign");
+  if (assignTbl) assignTbl.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t && (t.classList.contains("wd-chk") || t.tagName === "SELECT")) scheduleAssignAutoSave();
+  });
 }
 
 
