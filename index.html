@@ -266,6 +266,7 @@
 tr.row-extra      > td { background:#d7f0d7; }  /* 薄い緑 */
 tr.row-rest       > td { background:#ffe0b2; }  /* 薄いオレンジ */
 tr.row-bunin-anom > td { background:#e1bee7; }  /* 紫 */
+tr.row-off        > td { background:#ececec; color:#888; }  /* 休み(出退勤実績0): グレー */
 /* 勤務地セルの色分け・遅刻/早退の強調は、行の強調背景より優先して維持する */
 tr.row-extra > td.loc-honin, tr.row-rest > td.loc-honin, tr.row-bunin-anom > td.loc-honin { background:#ffd6e3; }
 tr.row-extra > td.loc-bunin, tr.row-rest > td.loc-bunin, tr.row-bunin-anom > td.loc-bunin { background:#cce8ff; }
@@ -2657,6 +2658,7 @@ function renderCombinedTable() {
   const rowRest = [];   // 本来の出勤曜日なのに休み(行を薄いオレンジで強調)
   const rowPurple = []; // 分院なしパターンなのに 分院→本院(行を紫で強調)
   const rowRegular = []; // 正規の出勤曜日の行(行全体を赤枠で強調)
+  const rowOff = [];    // 休み(出退勤実績0)の行(行全体をグレーで強調)
 
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2666,7 +2668,7 @@ function renderCombinedTable() {
     let specStr = r[idx.spec] || "";
     let punchStr = "";
     let ymd = null;
-    let late = false, early = false, extra = false, rest = false, purple = false, regular = false;
+    let late = false, early = false, extra = false, rest = false, purple = false, regular = false, off = false;
     let dispLoc = r[idx.loc] || "";   // 出勤場所の表示値(条件により本院⇄分院に読み替え)
     let workStr = r[idx.work] || "";  // 実労働時間の表示値(定時前を除外して上書きする場合あり)
     const dm = dateStr.match(/(\d+)\/(\d+)/);
@@ -2753,6 +2755,9 @@ function renderCombinedTable() {
       // 正規の出勤曜日かどうか(赤枠表示用)
       regular = !!(wd && regularWeekdaySet && regularWeekdaySet.has(wd));
 
+      // 休み(出退勤ともに実績なし=到来済みの日)→ 行をグレーで強調
+      off = dayDate <= _today && clockIn == null && clockOut == null;
+
       // 正規の出勤曜日以外に出勤している日(緑)
       if (worked && wd && regularWeekdaySet && !regularWeekdaySet.has(wd)) extra = true;
 
@@ -2778,6 +2783,7 @@ function renderCombinedTable() {
     rowRest.push(rest);
     rowPurple.push(purple);
     rowRegular.push(regular);
+    rowOff.push(off);
     return [
       r[idx.date] || "",
       r[idx.kb] || "",
@@ -2840,6 +2846,7 @@ function renderCombinedTable() {
     if (rowPurple[i]) tr.classList.add("row-bunin-anom");       // 分院なしパターン×分院→本院
     else if (rowExtra[i]) tr.classList.add("row-extra");        // 本来以外の出勤(緑)
     else if (rowRest[i]) tr.classList.add("row-rest");          // 本来の出勤曜日に休み(オレンジ)
+    else if (rowOff[i]) tr.classList.add("row-off");            // 休み(出退勤実績0)→ グレー
     if (rowRegular[i]) tr.classList.add("row-regular");         // 正規の出勤曜日 → 行全体を赤枠
     // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
     if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
