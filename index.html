@@ -329,6 +329,7 @@ td.saving { opacity:0.5; }
   background: #fff3e0; border: 1px solid #ffb74d; color: #e65100;
 }
 .indiv-alert-list .ial-name:hover { background: #ffe0b2; }
+.indiv-alert-list .ial-month { font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid #bbb; }
 
 /* 曜日グリッド */
 .weekday-grid {
@@ -2255,11 +2256,11 @@ function sortStaffRoster(list, sum) {
 // 何かしらのアラート(緑=正規外の出勤 / オレンジ=正規日の欠勤)が出ているスタッフを抽出。
 //   summary(全スタッフ月次) と 勤務形態マスタの出勤曜日マトリクスから概算判定する。
 //   ※ 各スタッフのチェック(特出等)未反映・紫(分院→本院)は対象外の概算リスト。
-function computeAlertStaff() {
+function computeAlertStaff(mi) {
   const sum = _summaryData;
   if (!sum || !Array.isArray(sum.staff) || !Array.isArray(sum.months) || !sum.months.length) return [];
-  const mi = summaryRefMonthIndex(sum);  // 実績が十分な最新月
-  if (mi < 0) return [];
+  if (mi == null) mi = summaryRefMonthIndex(sum);  // 既定: 実績が十分な最新月
+  if (mi < 0 || mi >= sum.months.length) return [];
   const WDN = ["月", "火", "水", "木", "金", "土", "日"];
   const norm = s => wpStripName(s).replace(/[\s　]/g, "");
   const wkMap = {};
@@ -2302,16 +2303,33 @@ function computeAlertStaff() {
   return out;
 }
 
-// 要確認スタッフのリストを見出し付近に描画。名前クリックでその人の記録を開く。
-function renderIndivAlertList() {
+// "2026-06" → "2026年6月"
+function fmtYmLabel(m) {
+  const p = String(m || "").split("-");
+  return (p.length >= 2) ? (p[0] + "年" + parseInt(p[1], 10) + "月") : String(m || "");
+}
+
+// 要確認スタッフのリストを見出し付近に描画。対象月を選べる。名前クリックでその人の記録を開く。
+function renderIndivAlertList(mi) {
   const box = document.getElementById("indiv-alert-list");
   if (!box) return;
-  const names = computeAlertStaff();
-  if (!names.length) { box.innerHTML = ""; return; }
+  const sum = _summaryData;
+  if (!sum || !Array.isArray(sum.months) || !sum.months.length) { box.innerHTML = ""; return; }
+  if (mi == null) mi = summaryRefMonthIndex(sum);  // 既定: 実績が十分な最新月
+  const names = computeAlertStaff(mi);
+  const monthSel = '<select class="ial-month">' +
+    sum.months.map((m, idx) =>
+      '<option value="' + idx + '"' + (idx === mi ? ' selected' : '') + '>' + escapeHtml(fmtYmLabel(m)) + '</option>'
+    ).join("") + '</select>';
+  const nameHtml = names.length
+    ? names.map(n => '<button type="button" class="ial-name" data-name="' + escapeHtml(n) + '">' +
+        escapeHtml(n) + '</button>').join("")
+    : '<span class="muted" style="font-size:12px">該当なし</span>';
   box.innerHTML =
-    '<span class="ial-label">要確認 ' + names.length + '名 (不規則な勤務あり):</span>' +
-    names.map(n => '<button type="button" class="ial-name" data-name="' + escapeHtml(n) + '">' +
-      escapeHtml(n) + '</button>').join("");
+    '<span class="ial-label" style="color:#555">対象月</span>' + monthSel +
+    '<span class="ial-label">要確認 ' + names.length + '名 (不規則な勤務あり):</span>' + nameHtml;
+  const ms = box.querySelector(".ial-month");
+  if (ms) ms.addEventListener("change", () => renderIndivAlertList(parseInt(ms.value, 10)));
   box.querySelectorAll(".ial-name").forEach(b => {
     b.addEventListener("click", () => {
       const nm = b.getAttribute("data-name");
