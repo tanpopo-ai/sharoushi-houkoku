@@ -2545,6 +2545,7 @@ function renderCombinedTable() {
   const pat = (typeof wpPatternForStaff === "function") ? wpPatternForStaff(_indivStaffName) : null;
   const variant = !!(pat && pat.kind === "変則");
   let dispOverMin = 0, dispSpecMin = 0;  // 表示中の残業/特出の月合計(分)
+  let dispWorkMin = 0;                    // 表示中の実労働の月合計(分。定時前を除外後)
 
   // 曜日ごとの出勤回数を集計(緑=本来以外の出勤 / オレンジ=本来休んだ日 の判定に使う)
   const hasPattern = !!(pat && pat.days && Object.keys(pat.days).length);
@@ -2593,6 +2594,7 @@ function renderCombinedTable() {
     let ymd = null;
     let late = false, early = false, extra = false, rest = false, purple = false;
     let dispLoc = r[idx.loc] || "";   // 出勤場所の表示値(条件により本院⇄分院に読み替え)
+    let workStr = r[idx.work] || "";  // 実労働時間の表示値(定時前を除外して上書きする場合あり)
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
@@ -2653,6 +2655,15 @@ function renderCombinedTable() {
         if (schedEnd != null && clockOut != null && clockOut < schedEnd) early = true;
       }
 
+      // 実労働時間: 定時開始より前(早出)の勤務は含めない(残業と同様の扱い)。
+      //   定時が不明な日はジョブカンの実労働をそのまま使用。
+      let workMin = actualMin;
+      if (worked && actualMin > 0 && schedStart != null && clockIn != null && clockIn < schedStart) {
+        workMin = Math.max(0, actualMin - (schedStart - clockIn));
+        workStr = hoursToHHMM(workMin / 60);
+      }
+      dispWorkMin += workMin;
+
       // 8:30(=510分)までに出勤、かつ 19:30(=1170分)以降に退勤なら場所移動と判断し、
       //   「分院→本院」と表示(AM分院→PM本院。記録上の勤務地に関わらず移動を示す)。
       //   表示のみ。残業/遅刻等の計算は元の勤務地 loc のまま。
@@ -2679,6 +2690,7 @@ function renderCombinedTable() {
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
       overStr = "__TOTAL_OVER__"; specStr = "__TOTAL_SPEC__";
+      workStr = "__TOTAL_WORK__";
     }
     rowKeys.push(ymd);
     rowLate.push(late);
@@ -2691,7 +2703,7 @@ function renderCombinedTable() {
       r[idx.kb] || "",
       fmtClock(r[idx.in]),
       fmtClock(r[idx.out]),
-      r[idx.work] || "",
+      workStr,
       punchStr,
       dispLoc,
       leaveStr,
@@ -2710,6 +2722,7 @@ function renderCombinedTable() {
     }
     if (tr[8] === "__TOTAL_OVER__") tr[8] = hoursToHHMM(dispOverMin / 60);
     if (tr[9] === "__TOTAL_SPEC__") tr[9] = hoursToHHMM(dispSpecMin / 60);
+    if (tr[4] === "__TOTAL_WORK__") tr[4] = hoursToHHMM(dispWorkMin / 60);
   });
 
   // 名前の横: 当月の合計残業時間バッジ
