@@ -2413,10 +2413,11 @@ function renderCombinedTable() {
                    "打刻", "出勤場所", "休暇", "残業時間", "特出時間", "託児利用時間", "備考"];
   let careMonthTotal = 0;
 
-  // 変則パターンのスタッフは、残業/特出をパターン(所定)基準で再計算する
+  // 残業/特出は「退勤 − 定時終了」で全スタッフ再計算する(早出は含めない・休憩の二重控除なし)
+  //   変則パターン: そのパターンの終了時刻 / 標準: 判定勤務地(本院・分院)の定時終了
   const pat = (typeof wpPatternForStaff === "function") ? wpPatternForStaff(_indivStaffName) : null;
   const variant = !!(pat && pat.kind === "変則");
-  let vOverTotal = 0, vSpecTotal = 0;  // 変則: 再計算の月合計(分)
+  let dispOverMin = 0, dispSpecMin = 0;  // 表示中の残業/特出の月合計(分)
 
   const _today = new Date(); _today.setHours(0, 0, 0, 0);
   const rowKeys = [];  // 各行の年月日キー (備考入力用。合計/不正行は null)
@@ -2447,32 +2448,40 @@ function renderCombinedTable() {
       const dayDate = new Date(year, mm - 1, dd);
       if ((onlyOne || statusFlag) && dayDate <= _today) punchStr = "打刻漏れ";
 
-      // 変則: 残業 = 「定時終了より後に退勤した分(退勤 − パターン終了)」で算出し、3時間以上を特出へ。
-      //   ・パターンの時刻を優先(早出は含めない=退勤基準のため自動的に除外)
-      //   ・休憩はパターン基準。ジョブカンの休憩は使わないため二重控除(ダブルカウント)しない
+      // 残業 = 「定時終了より後に退勤した分(退勤 − 定時終了)」。早出は含めない/休憩は二重控除しない。
+      //   3時間以上を特出に振り分け。判定できない日(勤務地不明等)はジョブカン値を維持。
+      const wd = (dateStr.match(/\((.)\)/) || [])[1];
+      const clockOut = wpToMin(r[idx.out]);
+      const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
+      let otMin = null;  // null = このセルは再計算せずジョブカン値を維持
       if (variant) {
-        const wd = (dateStr.match(/\((.)\)/) || [])[1];
-        const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
-        if (wd && actualMin > 0) {
-          const dayDef = (pat.days || {})[wd];          // [開始, 終了, 休憩, (勤務地)]
-          let otMin;
-          if (!dayDef) {
-            otMin = actualMin;                          // 所定の無い曜日に出勤 → 全て残業/特出
-          } else {
-            const schedEnd = wpToMin(dayDef[1]);        // パターンの終了時刻
-            const clockOut = wpToMin(r[idx.out]);       // 実退勤時刻
-            otMin = (schedEnd != null && clockOut != null && clockOut > schedEnd)
-              ? (clockOut - schedEnd) : 0;
+        if (actualMin > 0) {
+          const dayDef = (pat.days || {})[wd];
+          if (!dayDef) otMin = actualMin;               // 所定の無い曜日に出勤 → 全て残業/特出
+          else {
+            const se = wpToMin(dayDef[1]);
+            otMin = (se != null && clockOut != null && clockOut > se) ? (clockOut - se) : 0;
           }
-          if (otMin >= 180) { specStr = hoursToHHMM(otMin / 60); overStr = "0:00"; vSpecTotal += otMin; }
-          else { overStr = hoursToHHMM(otMin / 60); specStr = "0:00"; vOverTotal += otMin; }
-        } else {
-          overStr = "0:00"; specStr = "0:00";
+        } else otMin = 0;                               // 休み等
+      } else {
+        const loc = String(r[idx.loc] || "");
+        const se = (typeof wpStandardEndMin === "function") ? wpStandardEndMin(loc, wd) : null;
+        if (se != null) {
+          otMin = (clockOut != null && clockOut > se) ? (clockOut - se) : 0;
+        } else if (loc === "休み") {
+          otMin = 0;                                    // 休みは残業なし
         }
+        // それ以外(勤務地不明/定時未取得) → otMin=null → ジョブカン値を維持
       }
+      if (otMin != null) {
+        if (otMin >= 180) { specStr = hoursToHHMM(otMin / 60); overStr = "0:00"; }
+        else { overStr = hoursToHHMM(otMin / 60); specStr = "0:00"; }
+      }
+      dispOverMin += Math.round((parseTime(overStr) || 0) * 60);
+      dispSpecMin += Math.round((parseTime(specStr) || 0) * 60);
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
-      if (variant) { overStr = "__V_OVER__"; specStr = "__V_SPEC__"; }
+      overStr = "__TOTAL_OVER__"; specStr = "__TOTAL_SPEC__";
     }
     rowKeys.push(ymd);
     return [
@@ -2491,13 +2500,13 @@ function renderCombinedTable() {
     ];
   });
 
-  // 合計行の託児利用時間・変則の残業/特出 月合計を確定
+  // 合計行の託児利用時間・残業/特出 月合計を確定(表示中の日次値の合計)
   tableRows.forEach(tr => {
     if (tr[10] === "__MONTH_TOTAL__") {
       tr[10] = careMonthTotal > 0 ? hoursToHHMM(careMonthTotal) : "0:00";
     }
-    if (tr[8] === "__V_OVER__") tr[8] = hoursToHHMM(vOverTotal / 60);
-    if (tr[9] === "__V_SPEC__") tr[9] = hoursToHHMM(vSpecTotal / 60);
+    if (tr[8] === "__TOTAL_OVER__") tr[8] = hoursToHHMM(dispOverMin / 60);
+    if (tr[9] === "__TOTAL_SPEC__") tr[9] = hoursToHHMM(dispSpecMin / 60);
   });
 
   renderTable("tbl-combined", headers, tableRows, (col, val) => {
@@ -3251,6 +3260,15 @@ function wpDayWorkMin(pat, wd) {
   const i = wpToMin(e[0]), o = wpToMin(e[1]), b = wpToMin(e[2]) || 0;
   if (i == null || o == null || o <= i) return null;
   return o - i - b;
+}
+
+// 標準(定時)の終了時刻(分)。判定勤務地(本院/分院)と曜日で、勤務形態マスタの定時から引く。
+// 該当が無ければ null(=残業を再計算せずジョブカン値を維持)。
+function wpStandardEndMin(loc, wd) {
+  if (!_wpData || (loc !== "本院" && loc !== "分院")) return null;
+  const p = (_wpData.patterns || []).find(x => x.id === loc);
+  const e = p && p.days && p.days[wd];
+  return e ? wpToMin(e[1]) : null;
 }
 
 function loadPatterns() {
