@@ -395,6 +395,15 @@
 .inq-st-却下 { color:#9e9e9e; }
 .inq-st-対応済 { color:#1565c0; font-weight:bold; }
 
+/* 遅刻・早退の打刻セル (黄色背景+赤文字) */
+.time-flag { background:#fff59d !important; color:#c62828 !important; font-weight:bold; }
+/* 当月出勤日数バッジ */
+#indiv-days-badge {
+  display:inline-block; margin:0 6px; padding:2px 10px; border-radius:12px;
+  background:#e3f2fd; color:#1565c0; font-size:12px; font-weight:bold; border:1px solid #90caf9;
+}
+#indiv-days-badge:empty { display:none; }
+
 /* 打刻漏れ */
 .punch-missing { background:#ffebee; color:#c62828; font-weight:bold; text-align:center; white-space:nowrap; }
 .punch-missing::before { content:"⚠ "; }
@@ -711,7 +720,8 @@
         または:
         <select id="indiv-staff-select"></select>
         <span id="indiv-loading"></span>
-        <!-- 名前のすぐ右: 託児利用バッジ -->
+        <!-- 名前のすぐ右: 当月出勤日数 + 託児利用バッジ -->
+        <span id="indiv-days-badge"></span>
         <span id="indiv-care-badge"></span>
       </p>
 
@@ -2420,7 +2430,9 @@ function renderCombinedTable() {
   let dispOverMin = 0, dispSpecMin = 0;  // 表示中の残業/特出の月合計(分)
 
   const _today = new Date(); _today.setHours(0, 0, 0, 0);
-  const rowKeys = [];  // 各行の年月日キー (備考入力用。合計/不正行は null)
+  const rowKeys = [];   // 各行の年月日キー (備考入力用。合計/不正行は null)
+  const rowLate = [];   // 遅刻(出勤セルを強調)
+  const rowEarly = [];  // 早退(退勤セルを強調)
 
   const tableRows = rows.map(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2430,6 +2442,7 @@ function renderCombinedTable() {
     let specStr = r[idx.spec] || "";
     let punchStr = "";
     let ymd = null;
+    let late = false, early = false;
     const dm = dateStr.match(/(\d+)\/(\d+)/);
     if (dm) {
       const mm = parseInt(dm[1], 10);
@@ -2448,29 +2461,32 @@ function renderCombinedTable() {
       const dayDate = new Date(year, mm - 1, dd);
       if ((onlyOne || statusFlag) && dayDate <= _today) punchStr = "打刻漏れ";
 
-      // 残業 = 「定時終了より後に退勤した分(退勤 − 定時終了)」。早出は含めない/休憩は二重控除しない。
-      //   3時間以上を特出に振り分け。判定できない日(勤務地不明等)はジョブカン値を維持。
+      // その日の定時(開始・終了)を取得: 変則=パターン / 標準=判定勤務地(本院・分院)
       const wd = (dateStr.match(/\((.)\)/) || [])[1];
+      const loc = String(r[idx.loc] || "");
+      const clockIn = wpToMin(r[idx.in]);
       const clockOut = wpToMin(r[idx.out]);
       const actualMin = Math.round((parseTime(r[idx.work]) || 0) * 60);
-      let otMin = null;  // null = このセルは再計算せずジョブカン値を維持
+      let schedStart = null, schedEnd = null, unscheduledVariant = false;
+      if (variant) {
+        const dayDef = (pat.days || {})[wd];
+        if (dayDef) { schedStart = wpToMin(dayDef[0]); schedEnd = wpToMin(dayDef[1]); }
+        else if (actualMin > 0) unscheduledVariant = true;
+      } else {
+        schedStart = (typeof wpStandardStartMin === "function") ? wpStandardStartMin(loc, wd) : null;
+        schedEnd = (typeof wpStandardEndMin === "function") ? wpStandardEndMin(loc, wd) : null;
+      }
+
+      // 残業 = 「定時終了より後に退勤した分(退勤 − 定時終了)」。早出は含めない/休憩は二重控除しない。
+      let otMin = null;  // null = 再計算せずジョブカン値を維持
       if (variant) {
         if (actualMin > 0) {
-          const dayDef = (pat.days || {})[wd];
-          if (!dayDef) otMin = actualMin;               // 所定の無い曜日に出勤 → 全て残業/特出
-          else {
-            const se = wpToMin(dayDef[1]);
-            otMin = (se != null && clockOut != null && clockOut > se) ? (clockOut - se) : 0;
-          }
+          if (unscheduledVariant) otMin = actualMin;    // 所定の無い曜日に出勤 → 全て残業/特出
+          else otMin = (schedEnd != null && clockOut != null && clockOut > schedEnd) ? (clockOut - schedEnd) : 0;
         } else otMin = 0;                               // 休み等
       } else {
-        const loc = String(r[idx.loc] || "");
-        const se = (typeof wpStandardEndMin === "function") ? wpStandardEndMin(loc, wd) : null;
-        if (se != null) {
-          otMin = (clockOut != null && clockOut > se) ? (clockOut - se) : 0;
-        } else if (loc === "休み") {
-          otMin = 0;                                    // 休みは残業なし
-        }
+        if (schedEnd != null) otMin = (clockOut != null && clockOut > schedEnd) ? (clockOut - schedEnd) : 0;
+        else if (loc === "休み") otMin = 0;             // 休みは残業なし
         // それ以外(勤務地不明/定時未取得) → otMin=null → ジョブカン値を維持
       }
       if (otMin != null) {
@@ -2479,11 +2495,20 @@ function renderCombinedTable() {
       }
       dispOverMin += Math.round((parseTime(overStr) || 0) * 60);
       dispSpecMin += Math.round((parseTime(specStr) || 0) * 60);
+
+      // 遅刻(定時開始より遅い出勤)/早退(定時終了より早い退勤)を判定(実際に出勤した日のみ)
+      const worked = variant ? (actualMin > 0) : (loc === "本院" || loc === "分院");
+      if (worked) {
+        if (schedStart != null && clockIn != null && clockIn > schedStart) late = true;
+        if (schedEnd != null && clockOut != null && clockOut < schedEnd) early = true;
+      }
     } else if (dateStr.indexOf("合計") >= 0) {
       careStr = "__MONTH_TOTAL__";
       overStr = "__TOTAL_OVER__"; specStr = "__TOTAL_SPEC__";
     }
     rowKeys.push(ymd);
+    rowLate.push(late);
+    rowEarly.push(early);
     return [
       r[idx.date] || "",
       r[idx.kb] || "",
@@ -2527,10 +2552,13 @@ function renderCombinedTable() {
     return "";
   });
 
-  // 備考列(最右)に編集可能な入力を注入し、変更時にサーバ保存
+  // 備考列(最右)に編集可能な入力を注入 + 遅刻/早退セルの強調
   const tbl = document.getElementById("tbl-combined");
   const bodyRows = tbl ? tbl.querySelectorAll("tbody tr") : [];
   bodyRows.forEach((tr, i) => {
+    // 遅刻→出勤時刻セル(2)、早退→退勤時刻セル(3)を黄色背景+赤文字
+    if (rowLate[i] && tr.cells[2]) tr.cells[2].classList.add("time-flag");
+    if (rowEarly[i] && tr.cells[3]) tr.cells[3].classList.add("time-flag");
     const ymd = rowKeys[i];
     const cell = tr.cells[11];
     if (!cell) return;
@@ -2557,6 +2585,7 @@ function renderIndivExtras(rows, year, month) {
   const wdWorked = [0, 0, 0, 0, 0, 0, 0];  // 各曜日の出勤回数
   const satDays = {};  // 日 -> 出勤したか(boolean) ※出勤有無に関わらず全土曜を記録
   const sunDays = {};  // 日 -> 出勤したか(boolean) ※全日曜を記録
+  let totalWorked = 0; // 当月の出勤日数合計
 
   rows.forEach(r => {
     const dateStr = String(r[idx.date] || "");
@@ -2567,10 +2596,15 @@ function renderIndivExtras(rows, year, month) {
     const loc = String(r[idx.loc] || "");
     const worked = (loc === "本院" || loc === "分院");
     const wi = WD.indexOf(wd);
+    if (worked) totalWorked++;
     if (worked && wi >= 0) wdWorked[wi]++;  // 曜日グリッドは出勤回数のみ
     if (wd === "土") satDays[dd] = worked;
     if (wd === "日") sunDays[dd] = worked;
   });
+
+  // --- 名前の横: 当月出勤日数 ---
+  const daysBadge = document.getElementById("indiv-days-badge");
+  if (daysBadge) daysBadge.textContent = "当月出勤 " + totalWorked + "日";
 
   // --- 曜日グリッド HTML (曜日ごとに 見出し+出勤回数 の縦セル) ---
   let grid = '<div class="weekday-grid">';
@@ -3269,6 +3303,12 @@ function wpStandardEndMin(loc, wd) {
   const p = (_wpData.patterns || []).find(x => x.id === loc);
   const e = p && p.days && p.days[wd];
   return e ? wpToMin(e[1]) : null;
+}
+function wpStandardStartMin(loc, wd) {
+  if (!_wpData || (loc !== "本院" && loc !== "分院")) return null;
+  const p = (_wpData.patterns || []).find(x => x.id === loc);
+  const e = p && p.days && p.days[wd];
+  return e ? wpToMin(e[0]) : null;
 }
 
 function loadPatterns() {
